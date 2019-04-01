@@ -12,7 +12,7 @@ Sign up for a demo at https://vuestorefront.io/ (Vue Storefront integrated with 
 # Magento 1.9 data bridge
 Vue Storefront is platform agnostic - which mean: it can be connected to virtually any eCommerce CMS. This project is a data connector for *Magento 1.9*.
 
-**This bridge at current stage is synchronizing the catalog part: *products, categories, attributes and taxRules*  the missing part is *users, orders and cart* synchronization. If you like to have two way communication just contact us at contributors@vuestorefront.io**.
+**From 26th of Feb 2019** this is module is finally **MIT** licensed with **full support for shopping carts, orders and users sync**!
 
 Areas for improvements:
 - performance (right now it's single threaded but can be easily modified to use node-cluster),
@@ -44,7 +44,17 @@ To make sure that the module works just fine You can try to authorize the user u
 
 ![Postman test](doc/media/postman.png)
 
-## Node app setup
+## Magento 1 data indexer setup
+
+Vue Storefront is using the ElasticSearch middleware for querying the catalog and static data. To inorder to have the data indexed You may chose the native Magento1 module or use `node-app` middleware provided.
+
+### Native/recommended option
+
+In order to have all the products, categories and CMS pages indexed into Elastic Search please do install [magento1-vsbridge-indexer](https://github.com/DivanteLtd/magento1-vsbridge-indexer#installation-instructionsgetting-stared) module and set-up proper connection to the Elastic Search that Your `vue-storefront-api` is using.
+
+[Read the install instruction](https://github.com/DivanteLtd/magento1-vsbridge-indexer#installation-instructionsgetting-stared)
+
+### Alternative option
 
 As You've probably noticed in the cloned directory there is a second folder called [`node-app`](https://github.com/DivanteLtd/magento1-vsbridge/tree/master/node-app). This is a consumer application that's responsible for synchronizing the Magento1 data with the ElasticSearch instance.
 
@@ -72,6 +82,23 @@ By default Vue Storefront uses ES index named `vue_storefront_catalog`. Please a
 - `vue-storefront-api` [config file](https://github.com/DivanteLtd/vue-storefront-api/tree/master/config) `local.json` to point to right index name.
 
 Restart `vue-storefront` and `vue-storefront-api`.
+
+## Vue Storefront API setup
+
+**Please note:** The `vue-storefront-api` Magento1 support is available [from PR190, 26th of Feb 2019](https://github.com/DivanteLtd/vue-storefront-api/pull/190) - please make sure You're using the latest vue-storefront-api version.
+
+After installing the [vue-storefront-api](https://github.com/DivanteLtd/vue-storefront-api) You need to change the `config/local.json` to change the platform settings:
+
+```json
+  "platform": "magento1",
+  "magento1": {
+    "url": "http://magento-demo.local",
+    "imgUrl": "http://magento-demo.local/media/catalog/product",
+    "api": {
+      "url": "http://magento-demo.local/vsbridge",
+    }
+  },
+```
 
 # Available commands
 The bridge works on temporary, versioned ES indexes. You decide when the index should be published (when all data objects are properly set). All commands exec from `node-app/src` directory.
@@ -122,8 +149,7 @@ As you may observed, configured products do work perfectly well after imported t
 Please feel free to extend Magento module or Node app and contribute Your changes to the community!
 
 Some ideas for contributions:
-- media gallery sync,
-- shopping cart / order sync (please [contact us for details](mailto:contributors@vuestorefront.io)).
+- authorized users checkout.
 
 # License
 `magento1-vsbridge` source code is completely free and released under the [MIT License](https://github.com/DivanteLtd/vue-storefront/blob/master/LICENSE).
