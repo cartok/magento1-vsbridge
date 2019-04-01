@@ -9,12 +9,13 @@ class VsBridgeApiClient {
      */
     constructor(config) {
         this.config = config
-
-        if (!config.vsbridge.apiKey || !config.vsbridge.url)
+        
+        if (!config.vsbridge.apiKey || !config.vsbridge.url){
             throw Error('apiKey and url are required config keys for Pimcore Api Client')
-    
+        }
+        this.apiKey = config.vsbridge.apiKey
+
         this.baseUrl = `${config.url}vsbridge/`
-        this.apiKey = config.apiKey
         this.client = unirest
     }
 
