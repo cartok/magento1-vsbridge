@@ -68,10 +68,12 @@ function authUser(callback) {
             console.log('Got auth token ', resp.body.result)
 
             if (callback) {
-                callback(resp.body);
+                callback(resp.body)
             }
         } else {
-            console.error(resp.body.result);
+            console.error(resp)
+            console.error(resp.body)
+            console.error(resp.body.result)
         }
     });
 }
