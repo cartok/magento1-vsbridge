@@ -1,16 +1,6 @@
 'use strict'
 const unirest = require('unirest')
 
-function getOAuthHeaderString(config) {
-    const settings = Object.assign({}, config.vsbridge.auth.oauth, {
-        oauth_signature_method: 'HMAC-SHA1',
-        oauth_version: '1.0'
-    })
-    return Object.keys(settings).reduce((OAuthString, key) => {
-        OAuthString += ` ${key}=${settings[key]}`
-        return OAuthString
-    }, 'OAuth')
-}
 class VsBridgeApiClient {
 
     /**
@@ -36,9 +26,7 @@ class VsBridgeApiClient {
         const headers = {
             'Accept': 'application/json', 
             'Content-Type': 'application/json',
-            'Authorization': getOAuthHeaderString(this.config),
         }
-        console.log('HEADERS:', headers)
         return unirest.headers(headers)
     }
     _setupUrl(endpointUrl) {
