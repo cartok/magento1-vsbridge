@@ -100,57 +100,83 @@ function createIndex(db, indexName, next) {
 
 async function putMappings(db, indexName, next, token) {
     let attributeData = await getAttributeData(token);
-    db.indices.putMapping({
-        index: indexName,
-        type: "product",
-        body: attributeData
-        }).then(res => {
-            console.dir(res, { depth: null, colors: true })
+    // db.indices.putMapping({
+    //     index: indexName,
+    //     type: "product",
+    //     body: attributeData
+    //     }).then(res => {
+    //         console.dir(res, { depth: null, colors: true })
 
             db.indices.putMapping({
                 index: indexName,
                 type: "product",
                 body: {
                     properties: {
-                        created_at: {
-                            type: "date",
+                        sku: { type: "keyword" },
+                        size: { type: "integer" },
+                        size_options: { type: "integer" },
+                        price: { type: "float" },
+                        has_options: { type: "boolean" },            
+                        special_price: { type: "float" },
+                        color: { type: "integer" },
+                        color_options: { type: "integer" },
+                        pattern: { type: "text" },
+                        id: { type: "long" },
+                        status: { type: "integer" },
+                        weight: { type: "integer" },
+                        visibility: { type: "integer" },
+                        created_at: { 
+                            type: "date",           
                             format: "yyyy-MM-dd HH:mm:ss||yyyy-MM-dd||epoch_millis"
                         },
-                        updated_at: {
-                            type: "date",
+                        updated_at: { 
+                            type: "date",           
                             format: "yyyy-MM-dd HH:mm:ss||yyyy-MM-dd||epoch_millis"
+                        },
+                        special_from_date: {
+                            type: "date",           
+                            format: "yyyy-MM-dd HH:mm:ss||yyyy-MM-dd||epoch_millis"
+                        },
+                        special_to_date: {
+                            type: "date",           
+                            format: "yyyy-MM-dd HH:mm:ss||yyyy-MM-dd||epoch_millis"
+                        },
+                        news_from_date: {
+                            type: "date",           
+                            format: "yyyy-MM-dd HH:mm:ss||yyyy-MM-dd||epoch_millis"
+                        },
+                        description: { type: "text" },
+                        name: { type: "text" },
+                        configurable_children: {
+                            properties: {
+                                has_options: { type: "boolean" },
+                                price: { type: "float" },
+                                sku: { type: "keyword" }
+                            }
                         },
                         configurable_options: {
                             properties: {
                                 attribute_id: { type: "long" },
                                 default_label: { type: "text"},
                                 label: { type: "text"},
-                                frontend_label: { type: "text"},
+                                frontend_label: { type: "text"},   
                                 store_label: { type: "text"},
                                 values: {
                                     properties: {
                                         default_label: { type: "text"},
                                         label: { type: "text"},
-                                        frontend_label: { type: "text"},
+                                        frontend_label: { type: "text"},                           
                                         store_label: { type: "text"},
-                                        value_index:  { type: "keyword" }
+                                        value_index:  { type: "keyword" }                          
                                     }
                                 }
                             }
                         },
+                        category_ids: { type: "long" },
                         eco_collection: { type: "integer" },
                         eco_collection_options: { type: "integer" },
                         erin_recommends: { type: "integer" },
-                        stock: {
-                            properties: {
-                                is_in_stock: {
-                                    "type": "boolean"
-                                },
-                                qty: {
-                                    "type": "long"
-                                }
-                            }
-                        }
+                        tax_class_id: { type: "long" }
                     }
                 }
             }).then(res1 => {
@@ -197,10 +223,10 @@ async function putMappings(db, indexName, next, token) {
                     throw new Error(err2)
                 })
             })
-        }).catch(err1 => {
-                console.error(err1)
-                next(err1)
-            })
+        // }).catch(err1 => {
+        //     console.error(err1)
+        //     next(err1)
+        // })
   }
 
 /**
