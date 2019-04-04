@@ -50,6 +50,7 @@ class Divante_VueStorefrontBridge_ProductsController extends Divante_VueStorefro
             }
 
             foreach ($productCollection as $product) {
+                $product->load('media_gallery');
                 $productDTO = $product->getData();
                 $stock = Mage::getModel('cataloginventory/stock_item')->loadByProduct($product);
                 $productDTO['id'] = intval($productDTO['entity_id']);
