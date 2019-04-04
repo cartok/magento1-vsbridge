@@ -198,10 +198,10 @@ async function putMappings(db, indexName, next, token) {
                 })
             })
         }).catch(err1 => {
-                console.error(err1)
-                next(err1)
-            })
-  }
+            console.error(err1)
+            next(err1)
+        })
+}
 
 /**
  * Get attribute data for mappings
