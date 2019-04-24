@@ -47,8 +47,10 @@ class Divante_VueStorefrontBridge_CategoriesController extends Divante_VueStoref
     {
         $categoryDTO       = $category->getData();
         $categoryDTO['id'] = intval($categoryDTO['entity_id']);
+        $categoryDTO['slug'] = $categoryDTO['url_key'];
         unset($categoryDTO['entity_id']);
-        unset($categoryDTO['path']);
+        // @TODO: test if path is propperly passed when not unsetting it.
+        // unset($categoryDTO['path']);
 
         return $categoryDTO;
     }

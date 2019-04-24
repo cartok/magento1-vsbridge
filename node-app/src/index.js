@@ -215,7 +215,7 @@ function importListOf(entityType, importer, config, api, page = 0, pageSize = 10
     })
 }
 
-cli.command('products',  () => { // TODO: add parallel processing
+cli.command('add products',  () => { // TODO: add parallel processing
    showWelcomeMsg()
 
    importListOf(
@@ -232,7 +232,7 @@ cli.command('products',  () => { // TODO: add parallel processing
    })
 })
 
-cli.command('taxrules',  () => {
+cli.command('add taxrules',  () => {
     importListOf(
         'taxrule',
         new BasicImporter('taxrule', config, api, page = cli.options.page, pageSize = cli.options.pageSize),
@@ -248,7 +248,7 @@ cli.command('taxrules',  () => {
 
 });
 
-cli.command('attributes',  () => {
+cli.command('add attributes',  () => {
     showWelcomeMsg()
     importListOf(
         'attribute',
@@ -264,7 +264,7 @@ cli.command('attributes',  () => {
     })
 });
 
-cli.command('categories',  () => {
+cli.command('add categories',  () => {
     showWelcomeMsg()
     importListOf(
         'category',
@@ -280,7 +280,7 @@ cli.command('categories',  () => {
     })
 });
 
-cli.command('cms',  () => {
+cli.command('add cms',  () => {
     showWelcomeMsg()
     if (cli.options.pages) {
         importCmsPages()
@@ -295,15 +295,46 @@ cli.command('cms',  () => {
     }
 });
 
-cli.command('new',  () => {
+cli.command('create new index',  () => {
     showWelcomeMsg()
     recreateTempIndex()
 });
 
-cli.command('publish',  () => {
+cli.command('publish current index',  () => {
     showWelcomeMsg()
     publishTempIndex()
 });
+
+// @NOTE: command-router does not support --, -, ? or alike commands
+const COMMANDS_HELP = [ 'help', 'h', ]
+function showHelp(){
+    console.log('commands:', {
+        [COMMANDS_HELP.join(' | ')]: 'show this help',
+        'create new index': 'create a new index based on current mappings',
+        'add products': 'add products to the currently published index',
+        'add categories': 'add categories to the currently published index',
+        'add attributes': 'add attributes to the currently published index',
+        'add taxrules': 'add taxrules to the currently published index',
+        'add cms': 'add cms to the currently published index',
+        'publish current index': 'publish a newly created unpublished index',
+        // 'delete current index': 'delete a newly created unpublished index',
+        // 'delete index': 'delete index by id or name',
+    })
+}
+COMMANDS_HELP.forEach(command => {
+    cli.command(command, () => {
+        showWelcomeMsg()
+        showHelp()
+    });
+})
+
+// @TODO
+// cli.command('delete unpublished index',  () => {
+//     showWelcomeMsg()
+// });
+// cli.command('delete index',  () => {
+//     showWelcomeMsg()
+// });
 
 cli.on('notfound', (action) => {
   console.error('I don\'t know how to: ' + action)
