@@ -174,39 +174,43 @@ function importListOf(entityType, importer, config, api, page = 0, pageSize = 10
         console.log('*** Getting objects list for', query)
         api.authWith(AUTH_TOKEN);
         api.get(config.vsbridge[entityType + '_endpoint']).type('json').query(query).end((resp) => {
-            if (resp.body && resp.body.code !== 200) { // unauthroized request
-                console.log(resp.body.result);
-                process.exit(-1);
-            }
-
-            let queue = []
-            let index = 0
-            for(let obj of resp.body.result) { // process single record
-                let promise = importer.single(obj).then((singleResults) => {
-                    storeResults(singleResults, entityType)
-                    console.log('* Record done for ', obj.id, index, pageSize)
-                    index++
-                })
-                if(cli.options.runSerial)
-                    queue.push(() => promise)
-                else
-                    queue.push(promise)
-            }
-            let resultParser = (results) => {
-                console.log('** Page done ', page, resp.body.result.length)
-
-                if(resp.body.result.length === pageSize)
-                {
-                    if(recursive) {
-                        console.log('*** Switching page!')
-                        return importListOf(entityType, importer, config, api, page + 1, pageSize)
+            if(resp.body){
+                if(resp.body.code !== 200) { // unauthroized request
+                    console.log(resp);
+                    process.exit(-1);
+                }
+                if(resp.body.result){
+                    let queue = []
+                    let index = 0
+                    for(let obj of resp.body.result) { // process single record
+                        let promise = importer.single(obj).then((singleResults) => {
+                            storeResults(singleResults, entityType)
+                            console.log('* Record done for ', obj.id, index, pageSize)
+                            index++
+                        })
+                        if(cli.options.runSerial)
+                            queue.push(() => promise)
+                        else
+                            queue.push(promise)
                     }
+
+                    let resultParser = (results) => {
+                        console.log('** Page done ', page, resp.body.result.length)
+
+                        if(resp.body.result.length === pageSize)
+                        {
+                            if(recursive) {
+                                console.log('*** Switching page!')
+                                return importListOf(entityType, importer, config, api, page + 1, pageSize)
+                            }
+                        }
+                    }
+                    if(cli.options.runSerial)
+                        promise.serial(queue).then(resultParser).then((res) => resolve(res)).catch((reason) => { console.error(reason); reject() })
+                    else
+                        Promise.all(queue).then(resultParser).then((res) => resolve(res)).catch((reason) => { console.error(reason); reject() })
                 }
             }
-            if(cli.options.runSerial)
-                promise.serial(queue).then(resultParser).then((res) => resolve(res)).catch((reason) => { console.error(reason); reject() })
-            else
-                Promise.all(queue).then(resultParser).then((res) => resolve(res)).catch((reason) => { console.error(reason); reject() })
         })
     })
 }
