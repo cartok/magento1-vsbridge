@@ -5,6 +5,8 @@ Promise.all([
   results = results.map(result => result.hits)
   const demoShop = results[0]
   const devShop = results[1]
+  window.demoShop = demoShop
+  window.devShop = devShop
   console.log({demoShop})
   console.log({devShop})
 
@@ -68,7 +70,7 @@ Promise.all([
       url_key: entry.url_key,
     }))
   console.log({slugInDev})
-  
+
   console.log('dev is_in_stock')
   console.log('---------------------------------------------------')
   const stockInDev = devShop.hits
