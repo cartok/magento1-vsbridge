@@ -100,17 +100,6 @@ function createIndex(db, indexName, next) {
 
 // @TODO: What is the mistery of the next function parameter?
 async function putMappings(db, indexName, next, token) {
-    /**
-     * @NOTE: were not requesting attribute mapping for products from magento, instead using custom mapping as below
-     * const attributeData = await getAttributeData(token)
-     * db.indices.putMapping({
-     *     index: indexName,
-     *     type: "product",
-     *     body: attributeData
-     *     }).then(res => {
-     *         console.dir(res, { depth: null, colors: true })
-     */
-
     // set product mapping
     await db.indices.putMapping({
         index: indexName,
@@ -303,6 +292,52 @@ async function putMappings(db, indexName, next, token) {
     }).catch(err4 => {
         throw new Error(err4)
     })
+
+    // set cms_hierarchy mapping
+    await db.indices.putMapping({
+        index: indexName,
+        type: "cms_hierarchy",
+        body: {
+            properties: {
+                xpath: { type: "string" },
+            }
+        }
+    }).then(res => {
+        console.dir(res, { depth: null, colors: true })
+    }).catch(err => {
+        throw new Error(err)
+    })
+
+    // set cms_page mapping
+    await db.indices.putMapping({
+        index: indexName,
+        type: "cms_page",
+        body: {
+            properties: {
+                identifier: { "type": "string", "index" : "not_analyzed" },
+            }
+        }
+    }).then(res => {
+        console.dir(res, { depth: null, colors: true })
+    }).catch(err => {
+        throw new Error(err)
+    })
+
+    // set cms_block mapping
+    await db.indices.putMapping({
+        index: indexName,
+        type: "cms_block",
+        body: {
+            properties: {
+                // nothing needed by now
+            }
+        }
+    }).then(res => {
+        console.dir(res, { depth: null, colors: true })
+    }).catch(err => {
+        throw new Error(err)
+    })
+
 }
 
 /**

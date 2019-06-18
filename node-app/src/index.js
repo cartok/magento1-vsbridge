@@ -23,8 +23,11 @@ const es = require('elasticsearch')
 let client = new es.Client({ // as we're runing tax calculation and other data, we need a ES indexer
     host: config.elasticsearch.host,
     log: 'error',
-    apiVersion: '5.5',
-    requestTimeout: 10000
+    apiVersion: '5.6',
+    requestTimeout: 10000,
+    maxRetreis: 5,
+    requestTimeout: 50000,
+    maxSockets: 25
 })
 
 const CommandRouter = require('command-router')
