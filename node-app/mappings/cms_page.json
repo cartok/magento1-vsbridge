@@ -1,0 +1,9 @@
+{
+  "type": "cms_page",
+  "properties": {
+    "identifier": {
+      "type": "string",
+      "index": "not_analyzed"
+    }
+  }
+}

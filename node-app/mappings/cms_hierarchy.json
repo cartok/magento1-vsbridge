@@ -1,0 +1,8 @@
+{
+  "type": "cms_hierarchy",
+  "properties": {
+    "xpath": {
+      "type": "string"
+    }
+  }
+}

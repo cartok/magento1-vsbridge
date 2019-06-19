@@ -10,7 +10,8 @@ const path = require('path')
 const shell = require('shelljs')
 const fs = require('fs')
 const jsonFile = require('jsonfile')
-const putMappings = require('./meta/elastic').putMappings
+const putAllMappings = require('./meta/elastic').putAllMappings
+const updateMapping = require('./meta/elastic').updateMapping
 
 let INDEX_VERSION = 1
 let INDEX_META_DATA
@@ -23,8 +24,11 @@ const es = require('elasticsearch')
 let client = new es.Client({ // as we're runing tax calculation and other data, we need a ES indexer
     host: config.elasticsearch.host,
     log: 'error',
-    apiVersion: '5.5',
-    requestTimeout: 10000
+    apiVersion: '5.6',
+    requestTimeout: 10000,
+    maxRetreis: 5,
+    requestTimeout: 50000,
+    maxSockets: 25
 })
 
 const CommandRouter = require('command-router')
@@ -58,6 +62,7 @@ function showWelcomeMsg() {
     console.log('** CURRENT INDEX VERSION', INDEX_VERSION, INDEX_META_DATA.created)
 }
 
+// @todo: add auth for storyblok?
 function authUser(callback) {
     return api.post(config.vsbridge['auth_endpoint']).type('json').send({
         username: config.vsbridge.auth.username,
@@ -87,6 +92,17 @@ function readIndexMeta() {
     }
     return indexMeta
 }
+async function getCurrentIndex() {
+    const indices = await client.cat.indices({ format: 'json' })
+    const currentIndex = indices[0]
+    console.log(`current index is: ${currentIndex.index}.`)
+    return currentIndex
+}
+async function updateAllMappingsOfCurrentIndex(){
+    const currentIndex = await getCurrentIndex()
+    const currentIndexName = currentIndex.index
+    return await updateMapping(client, currentIndexName)
+}
 
 function recreateTempIndex() {
     let indexMeta = readIndexMeta()
@@ -101,11 +117,12 @@ function recreateTempIndex() {
     }
 
     let step2 = () => {
-        client.indices.create({ index: `${config.elasticsearch.indexName}_${INDEX_VERSION}` }).then(result=>{
+        return client.indices.create({ index: `${config.elasticsearch.indexName}_${INDEX_VERSION}` }).then(result => {
             console.log('Index Created', result)
             console.log('** NEW INDEX VERSION', INDEX_VERSION, INDEX_META_DATA.created)
-        }).then((result) => {
-            putMappings(client, `${config.elasticsearch.indexName}_${INDEX_VERSION}`, ()  => {}, AUTH_TOKEN)
+        }).then(() => {
+            console.log('Adding Mappings')
+            return putAllMappings(client, `${config.elasticsearch.indexName}_${INDEX_VERSION}`)
         })
     }
 
@@ -140,14 +157,16 @@ function publishTempIndex() {
 }
 
 function storeResults(singleResults, entityType) {
-    singleResults.map((ent) => {
+    let i = singleResults.length
+    while(--i >= 0){
+        const entry = singleResults[i]
         client.index({
             index: `${config.elasticsearch.indexName}_${INDEX_VERSION}`,
             type: entityType,
-            id: ent.id,
-            body: ent
+            id: entry.id,
+            body: entry
         })
-    })
+    }
 }
 
 
@@ -215,39 +234,22 @@ function importListOf(entityType, importer, config, api, page = 0, pageSize = 10
     })
 }
 
-cli.command('add products',  () => { // TODO: add parallel processing
-   showWelcomeMsg()
-
-   importListOf(
-       'product',
-       new BasicImporter('product', config, api, page = cli.options.page, pageSize = cli.options.pageSize),
-       config,
-       api,
-       page = cli.options.page,
-       pageSize = cli.options.pageSize
-    ).then((result) => {
-
-   }).catch(err => {
-      console.error(err)
-   })
-})
-
-cli.command('add taxrules',  () => {
-    importListOf(
-        'taxrule',
-        new BasicImporter('taxrule', config, api, page = cli.options.page, pageSize = cli.options.pageSize),
-        config,
-        api,
-        page = cli.options.page,
-        pageSize = cli.options.pageSize
-    ).then((result) => {
-
-    }).catch(err => {
-       console.error(err)
+cli.command('info', async () => {
+    // show info table
+    await client.cat.indices({ v: true }).then(res => {
+        console.log(res)
     })
-
+    // show current
+    await getCurrentIndex()
 });
-
+cli.command('update current mappings',  () => {
+    showWelcomeMsg()
+    updateAllMappingsOfCurrentIndex()
+});
+cli.command('create new index',  () => {
+    showWelcomeMsg()
+    recreateTempIndex()
+});
 cli.command('add attributes',  () => {
     showWelcomeMsg()
     importListOf(
@@ -257,13 +259,18 @@ cli.command('add attributes',  () => {
         api,
         page = cli.options.page,
         pageSize = cli.options.pageSize
-    ).then((result) => {
-
-    }).catch(err => {
-       console.error(err)
-    })
+    )
 });
-
+cli.command('add taxrules',  () => {
+    importListOf(
+        'taxrule',
+        new BasicImporter('taxrule', config, api, page = cli.options.page, pageSize = cli.options.pageSize),
+        config,
+        api,
+        page = cli.options.page,
+        pageSize = cli.options.pageSize
+    )
+});
 cli.command('add categories',  () => {
     showWelcomeMsg()
     importListOf(
@@ -279,7 +286,17 @@ cli.command('add categories',  () => {
        console.error(err)
     })
 });
-
+cli.command('add products',  () => {
+   showWelcomeMsg()
+   importListOf(
+       'product',
+       new BasicImporter('product', config, api, page = cli.options.page, pageSize = cli.options.pageSize),
+       config,
+       api,
+       page = cli.options.page,
+       pageSize = cli.options.pageSize
+    )
+})
 cli.command('add cms',  () => {
     showWelcomeMsg()
     if (cli.options.pages) {
@@ -294,29 +311,25 @@ cli.command('add cms',  () => {
         importCmsHierarchy()
     }
 });
-
-cli.command('create new index',  () => {
-    showWelcomeMsg()
-    recreateTempIndex()
-});
-
 cli.command('publish current index',  () => {
     showWelcomeMsg()
     publishTempIndex()
 });
 
 // @NOTE: command-router does not support --, -, ? or alike commands
-const COMMANDS_HELP = [ 'help', 'h', ]
+const COMMANDS_HELP = [ 'help', 'h', '' ]
 function showHelp(){
     console.log('commands:', {
-        [COMMANDS_HELP.join(' | ')]: 'show this help',
+        [COMMANDS_HELP.join(' | ')]: 'show help',
+        'info': 'show some info',
         'create new index': 'create a new index based on current mappings',
-        'add products': 'add products to the currently published index',
-        'add categories': 'add categories to the currently published index',
-        'add attributes': 'add attributes to the currently published index',
-        'add taxrules': 'add taxrules to the currently published index',
-        'add cms': 'add cms to the currently published index',
+        'add attributes': 'add attributes to the currently created or last published index',
+        'add taxrules': 'add taxrules to the currently created or last published index',
+        'add categories': 'add categories to the currently created or last published index',
+        'add products': 'add products to the currently created or last published index',
+        'add cms': 'add cms to the currently created or last published index',
         'publish current index': 'publish a newly created unpublished index',
+        'update current mappings': 'updates all mappings of the currently created or last published index',
         // 'delete current index': 'delete a newly created unpublished index',
         // 'delete index': 'delete index by id or name',
     })
