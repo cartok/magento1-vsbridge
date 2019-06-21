@@ -1,11 +1,8 @@
 {
-  "type": "category",
-  "properties": {
-    "nav_id": {
-      "type": "text"
-    },
-    "nav_brand_code": {
-      "type": "string"
-    }
+  "nav_id": {
+    "type": "text"
+  },
+  "nav_brand_code": {
+    "type": "string"
   }
 }

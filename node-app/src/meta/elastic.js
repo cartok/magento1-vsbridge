@@ -97,52 +97,67 @@ function createIndex(db, indexName, next) {
         step2()
     })
 }
-
-const typeMappings = require('../../mappings/index')
-async function updateMapping(db, indexName) {    
-    // @TODO: not finished
-    return new Promise((resolve, reject) => {
-        const promises = Object.values(typeMappings).reduce(async (prevPromise, mapping) => {
-            await prevPromise
-            const currentMapping = await db.indices.getMapping({
-                index: indexName,
-                type: mapping.type
-            })
-            const currentProps = currentMapping[indexName].mappings[mapping.type].properties
-            const newPropKeys = Object.keys(currentProps).filter(key => !Object.keys(mapping.properties).includes(key))
-            console.log({type: mapping.type, newPropKeys})
-        }, Promise.resolve())
-        console.log({promises})
-        resolve()
-    })
-}
+// @note: reading mappings from a directory enables us to easily use mapping files outside of the project instead.
+const fs = require('fs')
+const path = require('path')
+const mappingsDirectory = path.join(__dirname, '../../mappings')
+const typeMappings = fs.readdirSync(mappingsDirectory, { withFileTypes: false }).map(fullFileName => ({
+    type: fullFileName.replace(/(.*)\.json/, '$1'),
+    properties: require(`${mappingsDirectory}/${fullFileName}`),
+}))
+const promise = require('../lib/promise')
 async function putAllMappings(db, indexName) {
-    return new Promise((resolve, reject) => {
-        const promises = Object.values(typeMappings).reduce(async (prevPromise, mapping) => {
-            await prevPromise
-            return db.indices.putMapping({
-                updateAllTypes: true, // didnt help
+    return new Promise((resolveAll, rejectAll) => {
+        promise.serial(Object.values(typeMappings).map(mapping => () => new Promise((resolve, reject) => {
+            console.log(`Will put mapping for '${mapping.type}'.`)
+            db.indices.putMapping({
+                updateAllTypes: true, // if multiple document types have a field with the same name, update the field type for every document to get no conflicts.
                 index: indexName,
                 type: mapping.type,
                 body: {
                     properties: mapping.properties
                 }
             }).then(res => {
-                console.dir(res, { depth: null, colors: true })
+                console.log(`Successfully put mapping for '${mapping.type}'.`)
+                resolve(true)
             }).catch(err => {
                 // @TODO: write to mapping-errors.log
-                console.error(err)
-                throw new Error(err.message)
+                console.log(`Something happened when adding mapping for '${mapping.type}'.`)
+                console.log('Elasticsearch can only execute the following actions for existing mappings: add field, upgrade field to multi-field.')
+                console.log('If you need to change some field use reindex.')
+                reject(false)
+                rejectAll(err)
             })
-        }, Promise.resolve())
-        // @TODO: check promises all resolved
-        console.log({promises})
-        resolve()
+        })))
+        .then(res => {
+            console.log('Mappings were added successfully\n')
+            resolveAll(true)
+        })
+        .catch(e => rejectAll(e))
     })
 }
+
 async function putMapping(db, indexName, mapping){
-    // @TODO: not finished
-    console.log('not implemented.')
+    console.log(`Will add mapping for type '${mapping.type}'.`)
+    try {
+        const response = await db.indices.putMapping({
+            updateAllTypes: true, // if multiple document types have a field with the same name, update the field type for every document to get no conflicts.
+            index: indexName,
+            type: mapping.type,
+            body: {
+                properties: mapping.properties
+            }
+        })
+        console.log('Success.')
+        console.log(response)
+    } catch (e) {
+        console.error('Something went wrong, could not put mapping.')
+        console.error(e)
+    }
+}
+async function putMappingByFilePath(db, indexName, mappingFilePath){
+    const mapping = require(path.resolve(__dirname, mappingFilePath))
+    putMapping(db, indexName, mapping)
 }
 
 /**
@@ -171,7 +186,7 @@ function getAttributeData(token) {
 
 module.exports = {
     putAllMappings,
-    updateMapping,
+    putMappingByFilePath,
     putMapping,
     putAlias,
     createIndex,
