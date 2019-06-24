@@ -15,7 +15,7 @@ class VsBridgeApiClient {
         }
         this.apiKey = config.vsbridge.apiKey
 
-        this.baseUrl = `${config.url}vsbridge/`
+        this.baseUrl = `${config.url}/vsbridge`
         this.client = unirest
     }
 
@@ -26,7 +26,7 @@ class VsBridgeApiClient {
         return unirest.headers({
             'Accept': 'application/json', 
             'Content-Type': 'application/json',
-        }).strictSSL(false)
+        }).strictSSL(this.config.vsbridge.noSSL ? false : true)
     }
     _setupUrl(endpointUrl) {
         const url = endpointUrl + '?apikey=' + encodeURIComponent(this.apiKey)

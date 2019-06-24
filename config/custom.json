@@ -1,0 +1,30 @@
+{
+	"elasticsearch": {
+		"host": "localhost:9200",
+		"indexName": "vue_storefront_catalog"
+	},
+	"vsbridge": {
+		"noSSL": true,
+		"url": "https://ie-magento.lampenwelt.com",
+		"apiKey": "test",
+		"auth": {
+			"username": "divante",
+			"password": "magento123",
+			"secret": "Geiw0qua"
+		},
+		"auth_endpoint": "https://ie-magento.lampenwelt.com/vsbridge/auth/admin",
+		"product_endpoint": "https://ie-magento.lampenwelt.com/vsbridge/products/index",
+		"category_endpoint": "https://ie-magento.lampenwelt.com/vsbridge/categories/index",
+		"taxrule_endpoint": "https://ie-magento.lampenwelt.com/vsbridge/taxrules/index",
+		"attribute_endpoint": "https://ie-magento.lampenwelt.com/vsbridge/attributes/index",
+	 	"product_mapping_endpoint": "https://ie-magento.lampenwelt.com/vsbridge/attributes/productMapping",
+		"cms_page_endpoint": "https://ie-magento.lampenwelt.com/vsbridge/cms_page/index",
+		"cms_block_endpoint": "https://ie-magento.lampenwelt.com/vsbridge/cms_block/index",
+		"cms_hierarchy_endpoint": "https://ie-magento.lampenwelt.com/vsbridge/cms_hierarchy/index"
+	},
+	"storyblok": {
+		"endpoint": "https://api.storyblok.com/v1/cdn/stories",
+    "accessTokenDraft": "u3ifa269fB3lrMPh8HcsxAtt",
+    "accessTokenPublished": "vp5a57fBIrssPDA8lxZNuwtt"
+	}
+}

@@ -4,8 +4,10 @@
   "description": "Magento 1 To vue-storefront bridge",
   "main": "babel-node index.js",
   "dependencies": {
+    "@cartok/object-assign-deep": "^0.4.3",
     "babel-cli": "^6.26.0",
     "command-exists": "^1.2.2",
+    "command-line-usage": "^5.0.5",
     "command-router": "^1.0.1",
     "elasticdump": "^3.3.1",
     "elasticsearch": "^14.0.0",

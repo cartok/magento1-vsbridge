@@ -116,28 +116,53 @@ async function updateMapping(db, indexName) {
         resolve()
     })
 }
+// async function putAllMappings(db, indexName) {
+//     return new Promise((resolveAll, rejectAll) => {
+//         Object.values(typeMappings).forEach(async mapping => await db.indices.putMapping({
+//                 updateAllTypes: true, // this wont change types (not possible).
+//                 index: indexName,
+//                 type: mapping.type,
+//                 body: {
+//                     properties: mapping.properties
+//                 }
+//             }).then(res => {
+//             }).catch(err => {
+//                 // @TODO: write to mapping-errors.log
+//                 console.error(`Something happend when trying to add mapping for ${mapping.type}.`)
+//                 console.error(err)
+//                 rejectAll(err)
+//             })
+//         )
+//         console.log('foo')
+//         resolveAll(true)
+//     })
+// }
+const promise = require('../lib/promise')
 async function putAllMappings(db, indexName) {
-    return new Promise((resolve, reject) => {
-        const promises = Object.values(typeMappings).reduce(async (prevPromise, mapping) => {
-            await prevPromise
-            return db.indices.putMapping({
-                updateAllTypes: true, // didnt help
+    return new Promise((resolveAll, rejectAll) => {
+        promise.serial(Object.values(typeMappings).map(mapping => () => new Promise((resolve, reject) => {
+            db.indices.putMapping({
+                updateAllTypes: true, // this wont change types (not possible).
                 index: indexName,
                 type: mapping.type,
                 body: {
                     properties: mapping.properties
                 }
             }).then(res => {
-                console.dir(res, { depth: null, colors: true })
+                console.log(`Added mapping for ${mapping.type}.`)
+                resolve(true)
             }).catch(err => {
                 // @TODO: write to mapping-errors.log
-                console.error(err)
-                throw new Error(err.message)
+                console.log(`Something happened when adding mapping for ${mapping.type}.`)
+                reject(false)
+                rejectAll(err)
             })
-        }, Promise.resolve())
-        // @TODO: check promises all resolved
-        console.log({promises})
-        resolve()
+        })))
+        .then(res => {
+            console.log('Mappings were added successfully\n')
+            resolveAll(true)
+        })
+        .catch(e => rejectAll(e))
     })
 }
 async function putMapping(db, indexName, mapping){

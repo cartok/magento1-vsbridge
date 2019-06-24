@@ -1,68 +1,86 @@
-const config = require('../config.json')
+const path = require('path')
+const fs = require('fs')
+const jsonFile = require('jsonfile')
+const defaultConfig = require('../../config/default.json')
+const customConfig = require('../../config/custom.json')
+const objectAssignDeep = require('@cartok/object-assign-deep')
 const VsBridgeApiClient = require('./lib/vsbridge-api')
-const api = new VsBridgeApiClient(config)
 const BasicImporter = require('./importers/basic')
 const _ = require('lodash')
 const promiseLimit = require('promise-limit')
 const limit = promiseLimit(3) // limit N promises to be executed at time
 const promise = require('./lib/promise') // right now we're using serial execution because of recursion stack issues
-const path = require('path')
 const shell = require('shelljs')
-const fs = require('fs')
-const jsonFile = require('jsonfile')
-const putAllMappings = require('./meta/elastic').putAllMappings
-const updateMapping = require('./meta/elastic').updateMapping
+const elastic = require('./meta/elastic')
+const { spawn } = require('child_process')
+const es = require('elasticsearch')
+const CommandRouter = require('command-router')
 
-let INDEX_VERSION = 1
-let INDEX_META_DATA
 let AUTH_TOKEN = ''
 
-const INDEX_META_PATH = path.join(__dirname, '../var/indexMetadata.json')
-const { spawn } = require('child_process');
-const es = require('elasticsearch')
+// merge default and local configs and write to new file.
+const config = objectAssignDeep(defaultConfig, customConfig)
+jsonFile.writeFileSync(path.join(__dirname, '../../config/config.json'), config)
 
-let client = new es.Client({ // as we're runing tax calculation and other data, we need a ES indexer
+// init vue-storefront-api client
+const api = new VsBridgeApiClient(config)
+
+// init node cli 
+const cli = CommandRouter()
+
+// init elastic client
+const client = new es.Client({
     host: config.elasticsearch.host,
-    log: 'error',
-    apiVersion: '5.6',
-    requestTimeout: 10000,
-    maxRetreis: 5,
-    requestTimeout: 50000,
+    log: {
+        // level: ['error', 'warning', 'trace', 'info', 'debug'],
+        // level: ['error', 'warning', 'info', 'trace'],
+        level: ['error'],
+    },
+    apiVersion: '5.4',
+    requestTimeout: 5000,
+    maxRetries: 3,
     maxSockets: 25
 })
 
-const CommandRouter = require('command-router')
-const cli = CommandRouter()
-
-cli.option({ name: 'page'
-, alias: 'p'
-, default: 1
-, type: Number
+// add cli options
+cli.option({ 
+    name: 'page',
+    alias: 'p',
+    default: 1,
+    type: Number,
 })
-cli.option({ name: 'pageSize'
-, alias: 'l'
-, default: 25
-, type: Number
+cli.option({
+    name: 'pageSize',
+    alias: 'l',
+    default: 25,
+    type: Number,
+})
+cli.option({
+    name: 'partitions',
+    alias: 't',
+    default: 20,
+    type: Number,
+})
+cli.option({
+    name: 'runSerial',
+    alias: 's',
+    default: false,
+    type: Boolean,
+})
+cli.option({
+    name: 'id',
+    alias: 'i',
+    default: null,
+    type: Number,
+})
+cli.option({
+    name: 'name',
+    alias: 'n',
+    default: null,
+    type: String,
 })
 
-cli.option({ name: 'partitions'
-, alias: 't'
-, default: 20
-, type: Number
-})
-
-cli.option({ name: 'runSerial'
-, alias: 's'
-, default: false
-, type: Boolean
-})
-
-
-function showWelcomeMsg() {
-    console.log('** CURRENT INDEX VERSION', INDEX_VERSION, INDEX_META_DATA.created)
-}
-
-// @todo: add auth for storyblok?
+// @todo: add auth for storyblok
 function authUser(callback) {
     return api.post(config.vsbridge['auth_endpoint']).type('json').send({
         username: config.vsbridge.auth.username,
@@ -70,8 +88,7 @@ function authUser(callback) {
     }).end((resp) => {
         if(resp.body && resp.body.code == 200)
         {
-            console.log('Got auth token ', resp.body.result)
-
+            console.log(`Magento auth token: ${resp.body.result}\n`)
             if (callback) {
                 callback(resp.body)
             }
@@ -80,130 +97,298 @@ function authUser(callback) {
             console.error(resp.body)
             console.error(resp.body.result)
         }
-    });
+    })
 }
-
-function readIndexMeta() {
-    let indexMeta = { version: 0, created: new Date(), updated: new Date() }
-    try {
-        indexMeta = jsonFile.readFileSync(INDEX_META_PATH)
-    } catch (err){
-        console.log('Seems like first time run!', err.message)
-    }
-    return indexMeta
-}
-async function getCurrentIndex() {
-    const indices = await client.cat.indices({ format: 'json' })
-    const currentIndex = indices[0]
-    console.log(`current index is: ${currentIndex.index}.`)
-    return currentIndex
-}
-async function updateAllMappingsOfCurrentIndex(){
-    const currentIndex = await getCurrentIndex()
-    const currentIndexName = currentIndex.index
-    return await updateMapping(client, currentIndexName)
-}
-
-function recreateTempIndex() {
-    let indexMeta = readIndexMeta()
-
-    try {
-        indexMeta.version ++
-        INDEX_VERSION = indexMeta.version
-        indexMeta.updated = new Date()
-        jsonFile.writeFileSync(INDEX_META_PATH, indexMeta)
-    } catch (err) {
+// @TODO: move to elastic.js
+function importCmsPages() {
+    importListOf(
+        'cms_page',
+        new BasicImporter('cms_page', config, api, page = cli.options.page, pageSize = cli.options.pageSize),
+        config,
+        api,
+        page = cli.options.page,
+        pageSize = cli.options.pageSize
+    ).then((result) => {
+    }).catch(err => {
         console.error(err)
-    }
-
-    let step2 = () => {
-        return client.indices.create({ index: `${config.elasticsearch.indexName}_${INDEX_VERSION}` }).then(result => {
-            console.log('Index Created', result)
-            console.log('** NEW INDEX VERSION', INDEX_VERSION, INDEX_META_DATA.created)
-        }).then(() => {
-            console.log('Adding Mappings')
-            return putAllMappings(client, `${config.elasticsearch.indexName}_${INDEX_VERSION}`)
-        })
-    }
-
-    return client.indices.delete({
-        index: `${config.elasticsearch.indexName}_${INDEX_VERSION}`
-    }).then((result) => {
-        console.log('Index deleted', result)
-        return step2()
-    }).catch((err) => {
-        console.log('Index does not exst')
-        return step2()
+    })
+}
+// @TODO: move to elastic.js
+function importCmsBlocks() {
+    importListOf(
+        'cms_block',
+        new BasicImporter('cms_block', config, api, page = cli.options.page, pageSize = cli.options.pageSize),
+        config,
+        api,
+        page = cli.options.page,
+        pageSize = cli.options.pageSize
+    ).then((result) => {
+    }).catch(err => {
+        console.error(err)
+    })
+}
+// @TODO: move to elastic.js
+function importCmsHierarchy() {
+    importListOf(
+        'cms_hierarchy',
+        new BasicImporter('cms_hierarchy', config, api, page = cli.options.page, pageSize = cli.options.pageSize),
+        config,
+        api,
+        page = cli.options.page,
+        pageSize = cli.options.pageSize
+    ).then((result) => {
+    }).catch(err => {
+        console.error(err)
     })
 }
 
-function publishTempIndex() {
-    let step2 = () => {
-        client.indices.putAlias({ index: `${config.elasticsearch.indexName}_${INDEX_VERSION}`, name: config.elasticsearch.indexName }).then(result=>{
-            console.log('Index alias created', result)
-        })
+async function getInfo() {
+    // add name to index object, just for semantic
+    const indices = (await client.cat.indices({ format: 'json' }))
+        .map(index => Object.assign(index, { name: index.index }))
+
+    // filter all indices that start with the name in the config
+    // and get the latest version (biggest number)
+    const latestId = Math.max(...indices
+        .filter(i => i.index.startsWith(config.elasticsearch.indexName))
+        .map(i => i.name)
+        .map(version => parseInt(version.replace(/^.*_(\d+)$/,'$1')))
+    )
+    
+    // get whole data of the latest index
+    const latestIndex = indices.find(i => i.name.endsWith(`_${latestId}`))
+
+    // get aliases
+    // add name to index object, just for semantic
+    const aliases = (await client.cat.aliases({ format: 'json' }))
+        .map(alias => Object.assign(alias, { name: alias.index }))
+
+    // // get add mappings
+    // const mappings = await indices.map(async (index) => {
+    //     const mapping = await client.indices.getMapping({ index: index.name })
+    //     console.log({mapping})
+    //     return Object.assign({ index: index.name }, mapping.mappings)
+    // })
+    // console.log(mappings)
+    
+    return {
+        aliases,
+        indices: {
+            all: indices,
+            latest: Object.assign(latestIndex, {
+                id: latestId,
+                isPublished: aliases.find(alias => alias.index === latestIndex.name) === true
+            }),
+            aliased: aliases[0]
+        },
+        // mappings
+    }
+}
+async function getIndexById(id) {
+    const indices = await client.cat.indices({ format: 'json' })
+    const index = indices.find(i => i.index.endsWith(`_${id}`))
+    if(!index){
+        throw new Error(`Index ending with '${id}' could not be found.`)
+    }
+    return index
+}
+
+async function updateMappingsOfLatestIndex() {
+    console.log('Elasticsearch can only execute the following actions for existing mappings: add field, upgrade field to multi-field.')
+    console.log('If you need to change some field use reindex.')
+    const info = await getInfo()
+    try {
+        const response = await elastic.updateMapping(client, info.indices.latest.name)
+        return response
+    } catch (e){
+        console.error(e.message)
+        return Promise.reject()
+    }
+}
+
+async function setAlias(idOrName){
+    return new Promise(async (resolve, reject) => {
+        const { id, name } = idOrName
+        if((id && name) || !(id || name)){
+            throw new Error('Either provide id or name.')
+        }
+        
+        const index = id
+            ? `${config.elasticsearch.indexName}_${id}`
+            : name
+
+        const info = await getInfo()
+
+        // only one alias should exist, get a list of all aliases, filter, map to index name and delete their aliases.
+        info.aliases
+            .filter(alias => alias.alias === config.elasticsearch.indexName)
+            .map(alias => alias.index)
+            .forEach(async (index) => {
+                try {
+                    const response = await client.indices.deleteAlias({
+                        index,
+                        name: config.elasticsearch.indexName
+                    })
+                    console.log('Index alias deleted', response)
+                } catch(e){
+                    console.log('Index alias does not exists', e.message)
+                }
+            })
+
+        try {
+            const response = await client.indices.putAlias({
+                index,
+                name: config.elasticsearch.indexName
+            })
+            console.log('Index alias created', response)
+            resolve(response)
+        } catch(e){
+            console.log('Could not create alias', e.message)
+            reject()
+        }
+    })
+}
+async function setAliasToLatestIndex() {
+    const info = await getInfo()
+    const index = info.indices.latest.name
+    console.log(`Setting alias to latest index: ${index}`)
+    return setAlias({ name: index })
+}
+
+async function deleteIndex(idOrName){
+    const { id, name } = idOrName
+    if((id && name) || !(id || name)){
+        throw new Error('Either provide id or name.')
     }
 
-    return client.indices.deleteAlias({
-        index: `${config.elasticsearch.indexName}_${INDEX_VERSION-1}`,
-        name: config.elasticsearch.indexName
-    }).then((result) => {
-        console.log('Public index alias deleted', result)
-        step2()
-    }).catch((err) => {
-        console.log('Public index alias does not exists', err.message)
-        step2()
+    const index = id
+        ? `${config.elasticsearch.indexName}_${id}`
+        : name
+
+    try {
+        console.log(`Deleting index: ${index}.`)
+        const response = await client.indices.delete({
+            index
+        })
+        console.log(`Success.`)
+        return response
+    } catch(e) {
+        if(e.status === 404){
+            console.log('Could not delete, index does not exist.')
+        }
+        return Promise.reject()
+    }
+}
+async function reindexFromAliasedIndex(){
+    // reindexing references:
+    // https://medium.com/@eyaldahari/reindex-elasticsearch-documents-is-easier-than-ever-103f63d411c
+    // https://www.elastic.co/guide/en/elasticsearch/client/javascript-api/16.x/api-reference-5-6.html#api-indices-putmapping-5-6
+    // https://www.elastic.co/guide/en/elasticsearch/reference/5.6/docs-reindex.html
+
+    // create a new index and add current mappings
+    try {
+        await createIndexAndAddMappings()
+    } catch (e){
+        console.error('Something went wrong in createIndexAndAddMappings, stopping execution.')
+        return Promise.reject(e)
+    }
+
+    // get info after creation of the destination index
+    const info = await getInfo()
+
+    const destIndexName = info.indices.latest.name
+    const sourceIndexName = info.indices.aliased.name
+
+    // fill the new index with data from the previous index
+    console.log(`Will reindex ${destIndexName} with documents from ${sourceIndexName}\n`)
+    try {
+        const response = await client.reindex({
+            timeout: '30m',
+            wait_for_completion: false, // return directly after starting task. else we get timeout here. the process will run in the background use 'elastic info' to check its state.
+            body: {
+                source: {
+                    index: sourceIndexName
+                },
+                dest: {
+                    index: destIndexName
+                }
+            }
+        })
+        console.log(`Reindexing task was successfully triggered, check its state by using 'elastic info' command`, response)
+        setAliasToLatestIndex()
+        return Promise.resolve(response)
+    } catch (e){
+        console.error('Something went wrong when trying to reindex. Deleting newly created index.')
+        console.error(e)
+        console.error(`Error: status: ${e.status}, message: ${e.message}, failures: ${e.failures}\n`)
+        await deleteIndex({ name: destIndexName })
+        return Promise.reject(e)
+    }
+}
+
+async function createIndexAndAddMappings() {
+    return new Promise(async (resolve, reject) => {
+        console.log('Will create a new index by increasing the id of the latest and add the current mappings to it.')
+        const info = await getInfo()
+        const indexName = `${config.elasticsearch.indexName}_${info.indices.latest.id + 1}`
+        try {
+            const response = await client.indices.create({ index: indexName })
+            console.log('Index created', response)
+        } catch(e){
+            console.error(`Could not create index`)
+            console.error(e)
+            reject(e)
+        }
+        try {
+            const response = await elastic.putAllMappings(client, indexName)
+        } catch(e) {
+            console.error(`Could not add mapping`)
+            console.error(e)
+            reject(e)
+        }
+        resolve()
     })
 }
 
-function storeResults(singleResults, entityType) {
-    let i = singleResults.length
-    while(--i >= 0){
-        const entry = singleResults[i]
-        client.index({
-            index: `${config.elasticsearch.indexName}_${INDEX_VERSION}`,
-            type: entityType,
-            id: entry.id,
-            body: entry
-        })
-    }
-}
-
-
-/**
- * Import full list of specific entites
- * @param {String} entityType
- * @param {Object} importer
- */
-function importListOf(entityType, importer, config, api, page = 0, pageSize = 100, recursive = true) {
-    if (!config.vsbridge[entityType + '_endpoint'])
-    {
+async function importListOf(entityType, importer, config, api, page = 0, pageSize = 100, recursive = true) {
+    if (!config.vsbridge[entityType + '_endpoint']){
         console.error('No endpoint defined for ' + entityType)
         return
     }
 
-    return new Promise((resolve, reject) => {
-        let query = {
+    return new Promise(async (resolve, reject) => {
+        api.authWith(AUTH_TOKEN)
+
+        const info = await getInfo()
+        const query = {
             entityType: entityType,
             page: page,
             pageSize: pageSize
         }
 
-        let generalQueue = []
         console.log('*** Getting objects list for', query)
-        api.authWith(AUTH_TOKEN);
         api.get(config.vsbridge[entityType + '_endpoint']).type('json').query(query).end((resp) => {
             if(resp.body){
                 if(resp.body.code !== 200) { // unauthroized request
-                    console.log(resp);
-                    process.exit(-1);
+                    console.log(resp)
+                    process.exit(-1)
                 }
                 if(resp.body.result){
-                    let queue = []
+                    const queue = []
                     let index = 0
                     for(let obj of resp.body.result) { // process single record
-                        let promise = importer.single(obj).then((singleResults) => {
-                            storeResults(singleResults, entityType)
+                        const promise = importer.single(obj).then((singleResults) => {
+                            // store results
+                            let i = singleResults.length
+                            while(--i >= 0){
+                                const entry = singleResults[i]
+                                client.index({
+                                    index: `${config.elasticsearch.indexName}_${info.indices.latest.id}`,
+                                    type: entityType,
+                                    id: entry.id,
+                                    body: entry
+                                })
+                            }
                             console.log('* Record done for ', obj.id, index, pageSize)
                             index++
                         })
@@ -234,24 +419,59 @@ function importListOf(entityType, importer, config, api, page = 0, pageSize = 10
     })
 }
 
+// add commands
 cli.command('info', async () => {
     // show info table
     await client.cat.indices({ v: true }).then(res => {
         console.log(res)
     })
+    
     // show current
-    await getCurrentIndex()
-});
-cli.command('update current mappings',  () => {
-    showWelcomeMsg()
-    updateAllMappingsOfCurrentIndex()
-});
-cli.command('create new index',  () => {
-    showWelcomeMsg()
-    recreateTempIndex()
-});
+    const info = await getInfo()
+    console.log(`\nLatest index version is: ${info.indices.latest.id}.`)
+    
+    // show aliases
+    if(!info.aliases || info.aliases.length === 0){
+        console.log(`No alias defined. Use 'alias latest index' or 'alias index --id <number>' to enable some index.`)
+    } else {
+        console.log(`\nAlias ${info.aliases[0].alias} is set on ${info.aliases[0].index}.`)
+    }
+    
+    // show tasks
+    console.log('\nTasks:')
+    await client.cat.tasks({ detailed: true }).then(res => console.log(res))
+    console.log('Pending Tasks:')
+    await client.cat.pendingTasks({ v: true }).then(res => console.log(res))
+})
+
+cli.command('create index',  () => {
+    createIndexAndAddMappings()
+})
+
+cli.command('delete index',  () => {
+    const { id, name } = cli.options
+    deleteIndex({ id, name })
+})
+cli.command('reindex',  async () => {
+    reindexFromAliasedIndex()
+})
+
+cli.command('alias latest index', async () => {
+    setAliasToLatestIndex()
+})
+cli.command('alias index',  () => {
+    const { id, name } = cli.options
+    setAliasToLatestIndex({ id, name })
+})
+cli.command('delete latest index',  async () => {
+    const info = await getInfo()
+    deleteIndex(info.indices.latest.id)
+})
+cli.command('update latest index mappings',  () => {
+    updateMappingsOfLatestIndex()
+})
+
 cli.command('add attributes',  () => {
-    showWelcomeMsg()
     importListOf(
         'attribute',
         new BasicImporter('attribute', config, api, page = cli.options.page, pageSize = cli.options.pageSize),
@@ -260,7 +480,7 @@ cli.command('add attributes',  () => {
         page = cli.options.page,
         pageSize = cli.options.pageSize
     )
-});
+})
 cli.command('add taxrules',  () => {
     importListOf(
         'taxrule',
@@ -270,9 +490,8 @@ cli.command('add taxrules',  () => {
         page = cli.options.page,
         pageSize = cli.options.pageSize
     )
-});
+})
 cli.command('add categories',  () => {
-    showWelcomeMsg()
     importListOf(
         'category',
         new BasicImporter('category', config, api, page = cli.options.page, pageSize = cli.options.pageSize),
@@ -285,9 +504,8 @@ cli.command('add categories',  () => {
     }).catch(err => {
        console.error(err)
     })
-});
+})
 cli.command('add products',  () => {
-   showWelcomeMsg()
    importListOf(
        'product',
        new BasicImporter('product', config, api, page = cli.options.page, pageSize = cli.options.pageSize),
@@ -298,7 +516,6 @@ cli.command('add products',  () => {
     )
 })
 cli.command('add cms',  () => {
-    showWelcomeMsg()
     if (cli.options.pages) {
         importCmsPages()
     } else if (cli.options.blocks) {
@@ -310,115 +527,68 @@ cli.command('add cms',  () => {
         importCmsBlocks()
         importCmsHierarchy()
     }
-});
-cli.command('publish current index',  () => {
-    showWelcomeMsg()
-    publishTempIndex()
-});
-
-// @NOTE: command-router does not support --, -, ? or alike commands
-const COMMANDS_HELP = [ 'help', 'h', '' ]
-function showHelp(){
-    console.log('commands:', {
-        [COMMANDS_HELP.join(' | ')]: 'show help',
-        'info': 'show some info',
-        'create new index': 'create a new index based on current mappings',
-        'add attributes': 'add attributes to the currently created or last published index',
-        'add taxrules': 'add taxrules to the currently created or last published index',
-        'add categories': 'add categories to the currently created or last published index',
-        'add products': 'add products to the currently created or last published index',
-        'add cms': 'add cms to the currently created or last published index',
-        'publish current index': 'publish a newly created unpublished index',
-        'update current mappings': 'updates all mappings of the currently created or last published index',
-        // 'delete current index': 'delete a newly created unpublished index',
-        // 'delete index': 'delete index by id or name',
-    })
-}
-COMMANDS_HELP.forEach(command => {
-    cli.command(command, () => {
-        showWelcomeMsg()
-        showHelp()
-    });
 })
 
-// @TODO
-// cli.command('delete unpublished index',  () => {
-//     showWelcomeMsg()
-// });
-// cli.command('delete index',  () => {
-//     showWelcomeMsg()
-// });
+const commandLineUsage = require('command-line-usage')
+function showHelp(){
+    console.log(commandLineUsage([
+        {
+            header: 'Elasticsearch javascript cli specialized for vue-storefront.',
+            content: ''
+        },
+        {
+            header: 'Synopsis',
+            content: [
+                { name: 'help | h | ', summary: 'show help' },
+                { name: 'info', summary: 'show some info' },
+                { name: 'create index', summary: 'creates a new index, adds current mappings' },
+                { name: 'reindex', summary: 'creates a new index, adds current mappings and uses the previous index to copy the documents from' },
+                { name: 'delete index --id <number> | --name <string>', summary: 'deletes an index by id or name' },
+                { name: 'delete latest index', summary: 'delete latest index' },
+                { name: 'update latest index mappings', summary: 'updates all mappings of the latest index' },
+                { name: 'publish latest index', summary: 'set alias to latest index' },
+                { name: 'add attributes', summary: 'add attributes to the latest index' },
+                { name: 'add taxrules', summary: 'add taxrules to the latest index' },
+                { name: 'add categories', summary: 'add categories to the latest index' },
+                { name: 'add products', summary: 'add products to the latest index' },
+                { name: 'add cms', summary: 'add cms to the latest index' },
+            ]
+        }
+    ]))
+}
+cli.command('help', () => {
+    showHelp()
+})
+cli.command('h', () => {
+    showHelp()
+})
+cli.command('', () => {
+    showHelp()
+})
 
+// handle events events
 cli.on('notfound', (action) => {
   console.error('I don\'t know how to: ' + action)
+  showHelp()
   process.exit(1)
 })
-
 process.on('unhandledRejection', (reason, p) => {
-  console.error('Unhandled Rejection at: Promise', p, 'reason:', reason);
-   // application specific logging, throwing an error, or other logic here
-});
-
-process.on('uncaughtException', function (exception) {
-    console.error(exception); // to see your exception details in the console
-    // if you are on production, maybe you can send the exception details to your
-    // email as well ?
-});
-
-INDEX_META_DATA = readIndexMeta()
-INDEX_VERSION = INDEX_META_DATA.version
-authUser((authResp) => {
-  // RUN
-  AUTH_TOKEN = authResp.result
-  cli.parse(process.argv);
+  console.error(`Unhandled Rejection: ${p.message}, status: ${p.status}, reason: ${reason}.`)
+  console.error(p)
 })
-
-function importCmsPages() {
-    importListOf(
-        'cms_page',
-        new BasicImporter('cms_page', config, api, page = cli.options.page, pageSize = cli.options.pageSize),
-        config,
-        api,
-        page = cli.options.page,
-        pageSize = cli.options.pageSize
-    ).then((result) => {
-    }).catch(err => {
-        console.error(err)
-    })
-}
-
-function importCmsBlocks() {
-    importListOf(
-        'cms_block',
-        new BasicImporter('cms_block', config, api, page = cli.options.page, pageSize = cli.options.pageSize),
-        config,
-        api,
-        page = cli.options.page,
-        pageSize = cli.options.pageSize
-    ).then((result) => {
-    }).catch(err => {
-        console.error(err)
-    })
-}
-
-function importCmsHierarchy() {
-    importListOf(
-        'cms_hierarchy',
-        new BasicImporter('cms_hierarchy', config, api, page = cli.options.page, pageSize = cli.options.pageSize),
-        config,
-        api,
-        page = cli.options.page,
-        pageSize = cli.options.pageSize
-    ).then((result) => {
-    }).catch(err => {
-        console.error(err)
-    })
-}
-
-// Using a single function to handle multiple signals
-function handle(signal) {
-    console.log('Received  exit signal. Bye!');
+process.on('uncaughtException', function (exception) {
+    console.log('TRIGGERED?')
+    console.error(exception)
+})
+process.on('SIGINT', handleSignal)
+process.on('SIGTERM', handleSignal)
+function handleSignal(signal) {
+    console.log('Received exit signal. Bye!')
     process.exit(-1)
-  }
-process.on('SIGINT', handle);
-process.on('SIGTERM', handle);
+}
+
+// run application
+authUser((authResp) => {
+  AUTH_TOKEN = authResp.result
+  cli.parse(process.argv)
+})

@@ -1,6 +1,6 @@
 Promise.all([
   fetch('https://demo.storefrontcloud.io/api/catalog/vue_storefront_catalog/product/_search?from=0&size=100').then(d => d.json()),
-  fetch('http://prod.vuestorefront.io:8080/api/catalog/vue_storefront_catalog/product/_search?from=0&size=100').then(d => d.json()),
+  fetch('http://prod.vuestorefront.ie:8080/api/catalog/vue_storefront_catalog/product/_search?from=0&size=100').then(d => d.json()),
 ]).then(results => {
   results = results.map(result => result.hits)
   const demoShop = results[0]
@@ -86,7 +86,7 @@ Promise.all([
 })
 
 // ---------------------- is in stock test
-fetch('http://prod.vuestorefront.io:8080/api/catalog/vue_storefront_catalog/product/_search?from=0&size=10000')
+fetch('http://prod.vuestorefront.ie:8080/api/catalog/vue_storefront_catalog/product/_search?from=0&size=10000')
 .then(d => d.json())
 .then(result => {
   console.log('### is_in_stock')
@@ -104,7 +104,7 @@ fetch('http://prod.vuestorefront.io:8080/api/catalog/vue_storefront_catalog/prod
 })
 
 // ---------------------- media gallery test
-fetch('http://prod.vuestorefront.io:8080/api/catalog/vue_storefront_catalog/product/_search?from=0&size=10000')
+fetch('http://prod.vuestorefront.ie:8080/api/catalog/vue_storefront_catalog/product/_search?from=0&size=10000')
 .then(d => d.json())
 .then(result => {
   console.log('### media gallery')

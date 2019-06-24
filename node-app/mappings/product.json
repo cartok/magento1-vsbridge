@@ -91,6 +91,9 @@
         },
         "sku": {
           "type": "keyword"
+        },
+        "lw_smart_home_system": {
+          "type": "keyword"
         }
       }
     },
