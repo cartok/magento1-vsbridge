@@ -7,7 +7,8 @@
  *     .then(console.log.bind(console))
  */
 const serial = funcs =>
-funcs.reduce((promise, func) =>
+  funcs.reduce((promise, func) =>
     promise.then(result => func().then(Array.prototype.concat.bind(result))), Promise.resolve([]))
 
+// https://www.freecodecamp.org/news/node-js-module-exports-vs-exports-ec7e254d63ac/
 exports.serial = serial

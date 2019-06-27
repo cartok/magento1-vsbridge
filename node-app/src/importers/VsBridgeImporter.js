@@ -1,6 +1,6 @@
-const BasicImporter = require('./basic')
+const BasicImporter = require('./BasicImporter')
 
-class VSBridgeImporter extends BasicImporter {
+class VsBridgeImporter extends BasicImporter {
   constructor (entityType, config, api) {
     super(entityType, config, api)
     if (!config.vsbridge[entityType + '_endpoint']) {
@@ -9,4 +9,4 @@ class VSBridgeImporter extends BasicImporter {
   }
 }
 
-module.exports = VSBridgeImporter
+module.exports = VsBridgeImporter

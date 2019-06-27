@@ -17,6 +17,12 @@ module.exports = {
         'json'
     ],
     'rules': {
+        'promise/param-names': [
+            'off'
+        ],
+        'no-unused-vars': [
+            'warn'
+        ],
         'indent': [
             'error',
             2
@@ -27,7 +33,8 @@ module.exports = {
         ],
         'quotes': [
             'error',
-            'single'
+            'single',
+            { allowTemplateLiterals: true }
         ],
         'semi': [
             'error',

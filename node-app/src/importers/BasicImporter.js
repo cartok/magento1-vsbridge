@@ -1,4 +1,4 @@
-module.exports = class {
+class BasicImporter {
   constructor (entityType, config, api) {
     this.config = config
     this.api = api
@@ -16,3 +16,5 @@ module.exports = class {
     })
   }
 }
+
+module.exports = BasicImporter

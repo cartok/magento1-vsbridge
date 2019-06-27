@@ -1,48 +1,27 @@
-const path = require('path')
-const fs = require('fs')
-const jsonFile = require('jsonfile')
+// - keep positioned on top to generate a config that is used in many modules before importing those
 const defaultConfig = require('../../config/default.json')
 const customConfig = require('../../config/custom.json')
+const path = require('path')
+const jsonFile = require('jsonfile')
 const objectAssignDeep = require('@cartok/object-assign-deep')
-const VsBridgeApiClient = require('./lib/vsbridge-api')
-const BasicImporter = require('./importers/basic')
-const VSBridgeImporter = require('./importers/vsbridge')
-const _ = require('lodash')
-const promiseLimit = require('promise-limit')
-const limit = promiseLimit(3) // limit N promises to be executed at time
-const promise = require('./lib/promise') // right now we're using serial execution because of recursion stack issues
-const shell = require('shelljs')
-const elastic = require('./meta/elastic')
-const { spawn } = require('child_process')
-const es = require('elasticsearch')
-const CommandRouter = require('command-router')
-const StoryblokClient = require('storyblok-js-client')
-
-let AUTH_TOKEN = ''
-
-// merge default and local configs and write to new file.
 const config = objectAssignDeep(defaultConfig, customConfig)
 jsonFile.writeFileSync(path.join(__dirname, '../../config/config.json'), config)
+// - keep positioned on top to generate a config that is used in many modules before importing those
 
-// init vue-storefront-api client
-const vsbridgeApi = new VsBridgeApiClient(config)
+const CommandRouter = require('command-router')
 
-// init node cli
+const promise = require('./lib/promise')
+
+const VsBridgeImporter = require('./importers/VsBridgeImporter')
+
+const elasticClient = require('./clients/elasticClient')
+const vsBridgeClient = require('./clients/vsBridgeClient')
+const storyblokClient = require('./clients/storyblokClient')
+const elasticInterface = require('./interfaces/elasticInterface')
+
+let MAGENTO_AUTH_TOKEN = ''
+
 const cli = CommandRouter()
-
-// init elastic client
-const elasticClient = new es.Client({
-  host: config.elasticsearch.host,
-  log: {
-    // level: ['error', 'warning', 'trace', 'info', 'debug'],
-    // level: ['error', 'warning', 'info', 'trace'],
-    level: ['error']
-  },
-  apiVersion: '5.4',
-  requestTimeout: 5000,
-  maxRetries: 3,
-  maxSockets: 25
-})
 
 // add cli options
 cli.option({
@@ -94,40 +73,28 @@ cli.option({
   type: Boolean
 })
 
-
-
-
-// @todo: add auth for storyblok
-// https://github.com/storyblok/storyblok-js-client
-console.log(`Will auth to storyblok with token: ${config.storyblok.accessTokenPublished}`)
-function authToStoryblok () {
-}
-const storyblokApi = new StoryblokClient({
-  accessToken: config.storyblok.accessTokenPublished,
-  caches: {
-    clear: 'auto',
-    type: 'memory'
-  }
-})
-async function addPagesFromStoryblok (params) {
+// SB INTERFACE FUNCTION
+// @todo: test jsdoc, maybe go back to standard function param style with default values to be able to understand signature while function is folded.
+async function addPagesFromStoryblok (params = { index: null, type: undefined, page: 0, pageSize: 25 }) {
   // assign default params
   const { index, type, page, pageSize } = Object.assign({
     index: undefined,
     type: undefined,
-    page: 0, // during test 6 is max when per page 1 (only getting component types = 'page','article')
+    page: 0,
     pageSize: 25
   }, params)
 
   // check required params
   if (index === undefined || type === undefined) {
     // @todo: additional validation if index and type exist, else unhandled errors are possible.
-    throw new Error('You need to provide a valid \'index\' and \'type\' in the parameter object')
+    throw new Error(`You need to provide a valid 'index' and 'type' in the parameter object`)
   }
 
   // request data
+  let storyblokResponse
   try {
     // make request to storyblok
-    const response = await storyblokApi.get('cdn/stories', {
+    storyblokResponse = await storyblokClient.get('cdn/stories', {
       version: 'published',
       starts_with: `${config.country.toLowerCase()}/`,
       // @note: guess we dont need a query, just 'starts_with' attribute that gets config.country value.
@@ -143,13 +110,12 @@ async function addPagesFromStoryblok (params) {
     console.error('Something went wrong when trying to get pages from storyblok.')
     console.error({ params })
     console.error(e)
-    console.log('Process will exit now.')
-    process.exit(-1)
+    throw new Error(e)
   }
 
   // add pages to elastic index
   try {
-    const pages = response.data.stories
+    const pages = storyblokResponse.data.stories
     pages.forEach(page => {
       elasticClient.index({
         index,
@@ -182,30 +148,12 @@ async function addPagesFromStoryblok (params) {
   }
 }
 
-function authToMagento (callback) {
-  return vsbridgeApi.post(config.vsbridge['auth_endpoint']).type('json').send({
-    username: config.vsbridge.auth.username,
-    password: config.vsbridge.auth.password
-  }).end((resp) => {
-    if (resp.body && resp.body.code == 200)
-    {
-      console.log(`Magento auth token: ${resp.body.result}\n`)
-      if (callback) {
-        callback(resp.body)
-      }
-    } else {
-      // todo log response code etc instead of whole resp object
-      console.error(resp)
-      console.error(resp.body)
-    }
-  })
-}
-
+//
 async function getInfo () {
   // get all indices and add 'id' and 'name' to every index.
   const indices = (await elasticClient.cat.indices({ format: 'json' }))
     .map(index => Object.assign(index, {
-      id: parseInt(index.index.replace(/.*?\_(\d+)/, '$1')),
+      id: parseInt(index.index.replace(/.*?_(\d+)/, '$1')),
       name: index.index
     }))
     .filter(index => index.name.startsWith(config.elasticsearch.indexName))
@@ -265,7 +213,7 @@ async function getInfo () {
     }
   }
 }
-
+//
 async function setAlias (idOrName) {
   return new Promise(async (resolve, reject) => {
     const { id, name } = idOrName
@@ -304,17 +252,18 @@ async function setAlias (idOrName) {
       resolve(response)
     } catch (e) {
       console.log('Could not create alias', e.message)
-      reject()
+      reject(e)
     }
   })
 }
+//
 async function setAliasToLatestIndex () {
   const info = await getInfo()
   const index = info.indices.latest.name
   console.log(`Setting alias to latest index: ${index}`)
   return setAlias({ name: index })
 }
-
+//
 async function deleteIndex (idOrName) {
   const { id, name } = idOrName
   if ((id && name) || !(id || name)) {
@@ -327,18 +276,15 @@ async function deleteIndex (idOrName) {
 
   try {
     console.log(`Deleting index: ${index}.`)
-    const response = await elasticClient.indices.delete({
-      index
-    })
+    const response = await elasticClient.indices.delete({ index })
     console.log(`Successfully deleted index: ${index}.`)
     return response
   } catch (e) {
-    if (e.status === 404) {
-      console.log('Could not delete, index does not exist.')
-    }
-    return Promise.reject()
+    console.error(`Could not delete index '${index}'`)
+    return Promise.reject(e)
   }
 }
+//
 async function reindexFromAliasedIndex () {
   // reindexing references:
   // https://medium.com/@eyaldahari/reindex-elasticsearch-documents-is-easier-than-ever-103f63d411c
@@ -385,12 +331,14 @@ async function reindexFromAliasedIndex () {
     return Promise.reject(e)
   }
 }
-
+//
+// @todo: reduce logs here, unneded for elasticClient or elasticLibrary core functions?
 async function createIndexAndAddMappings () {
   return new Promise(async (resolve, reject) => {
     console.log('Will create a new index by increasing the id of the latest and adding the all mappings from the mappings directory to it.')
     const info = await getInfo()
     const indexName = `${config.elasticsearch.indexName}_${info.indices.latest.id + 1}`
+    // create index
     try {
       const response = await elasticClient.indices.create({ index: indexName })
       console.log('Index created', response)
@@ -399,8 +347,10 @@ async function createIndexAndAddMappings () {
       console.error(e)
       reject(e)
     }
+    // add mappings
     try {
-      const response = await elastic.putAllMappings(elasticClient, indexName)
+      const response = await elasticLibrary.putMappings(elasticClient, indexName)
+      console.log('Mappings added', response)
     } catch (e) {
       console.error('Could not add mapping')
       console.error(e)
@@ -411,9 +361,10 @@ async function createIndexAndAddMappings () {
   })
 }
 
+//
 async function importListOf (entityType, importer, page = 0, pageSize = 100) {
   return new Promise(async (resolve, reject) => {
-    importer.api.authWith(AUTH_TOKEN)
+    importer.api.authWith(MAGENTO_AUTH_TOKEN)
 
     const info = await getInfo()
     const query = {
@@ -448,25 +399,18 @@ async function importListOf (entityType, importer, page = 0, pageSize = 100) {
               console.log('* Record done for ', obj.id, index, pageSize)
               index++
             })
-            if (cli.options.runSerial)
-              {queue.push(() => promise)}
-            else
-              {queue.push(promise)}
+            if (cli.options.runSerial) { queue.push(() => promise) } else { queue.push(promise) }
           }
 
           let resultParser = (results) => {
             console.log('** Page done ', page, resp.body.result.length)
 
-            if (resp.body.result.length === pageSize)
-            {
+            if (resp.body.result.length === pageSize) {
               console.log('*** Switching page!')
-              return importListOf(entityType, importer, config, api, page + 1, pageSize)
+              return importListOf(entityType, importer, config, vsBridgeClient, page + 1, pageSize)
             }
           }
-          if (cli.options.runSerial)
-            {promise.serial(queue).then(resultParser).then((res) => resolve(res)).catch((reason) => { console.error(reason); reject() })}
-          else
-            {Promise.all(queue).then(resultParser).then((res) => resolve(res)).catch((reason) => { console.error(reason); reject() })}
+          if (cli.options.runSerial) { promise.serial(queue).then(resultParser).then((res) => resolve(res)).catch((reason) => { console.error(reason); reject(reason) }) } else { Promise.all(queue).then(resultParser).then((res) => resolve(res)).catch((reason) => { console.error(reason); reject(reason) }) }
         }
       }
     })
@@ -492,7 +436,6 @@ cli.command('info', async () => {
   }
 
   // show selected index
-
 
   // show tasks
   console.log('\nTasks:')
@@ -520,6 +463,7 @@ cli.command('alias index', () => {
   const { id, name } = cli.options
   setAliasToLatestIndex({ id, name })
 })
+// @todo: finish index selection + integration
 cli.command('select index', async () => {
   const info = await getInfo()
   const { id, name, aliased } = cli.options
@@ -551,11 +495,11 @@ cli.command('delete latest index', async () => {
 
 cli.command('update latest index mappings', async () => {
   const info = await getInfo()
-  elastic.putAllMappings(elasticClient, info.indices.latest.name)
+  elasticLibrary.putMappings(elasticClient, info.indices.latest.name)
 })
 cli.command('update aliased index mappings', async () => {
   const info = await getInfo()
-  elastic.putAllMappings(elasticClient, info.indices.aliased.name)
+  elasticLibrary.putMappings(elasticClient, info.indices.aliased.name)
 })
 cli.command('update mapping', () => {
   console.log('index selection not implemented.')
@@ -563,10 +507,10 @@ cli.command('update mapping', () => {
   // if(!path){
   //     throw new Error('Execute put mapping with -f or --file <path> and pass a valid json file like in node-app/mappings.')
   // }
-  // elastic.putMappingByFilePath(elasticClient, path)
+  // elastic.putMappingsFromDirectory(elasticClient, path)
 })
 
-
+// @todo: store getInfo result globally
 cli.command('add storyblok', async () => {
   const { page, pageSize } = cli.options
   getInfo().then(info => {
@@ -581,58 +525,58 @@ cli.command('add storyblok', async () => {
 cli.command('add attributes', () => {
   importListOf(
     'attribute',
-    new VSBridgeImporter('attribute', config, api),
-    page = cli.options.page,
-    pageSize = cli.options.pageSize
+    new VsBridgeImporter('attribute', config, vsBridgeClient),
+    cli.options.page,
+    cli.options.pageSize
   )
 })
 cli.command('add taxrules', () => {
   importListOf(
     'taxrule',
-    new VSBridgeImporter('taxrule', config, api),
-    page = cli.options.page,
-    pageSize = cli.options.pageSize
+    new VsBridgeImporter('taxrule', config, vsBridgeClient),
+    cli.options.page,
+    cli.options.pageSize
   )
 })
 cli.command('add categories', () => {
   importListOf(
     'category',
-    new VSBridgeImporter('category', config, api),
-    page = cli.options.page,
-    pageSize = cli.options.pageSize
+    new VsBridgeImporter('category', config, vsBridgeClient),
+    cli.options.page,
+    cli.options.pageSize
   )
 })
 cli.command('add products', () => {
   importListOf(
     'product',
-    new VSBridgeImporter('product', config, api),
-    page = cli.options.page,
-    pageSize = cli.options.pageSize
+    new VsBridgeImporter('product', config, vsBridgeClient),
+    cli.options.page,
+    cli.options.pageSize
   )
 })
 
 function importCmsPages () {
   return importListOf(
     'cms_page',
-    new VSBridgeImporter('cms_page', config, api),
-    page = cli.options.page,
-    pageSize = cli.options.pageSize
+    new VsBridgeImporter('cms_page', config, vsBridgeClient),
+    cli.options.page,
+    cli.options.pageSize
   )
 }
 function importCmsBlocks () {
   return importListOf(
     'cms_block',
-    new VSBridgeImporter('cms_block', config, api),
-    page = cli.options.page,
-    pageSize = cli.options.pageSize
+    new VsBridgeImporter('cms_block', config, vsBridgeClient),
+    cli.options.page,
+    cli.options.pageSize
   )
 }
 function importCmsHierarchy () {
   return importListOf(
     'cms_hierarchy',
-    new VSBridgeImporter('cms_hierarchy', config, api),
-    page = cli.options.page,
-    pageSize = cli.options.pageSize
+    new VsBridgeImporter('cms_hierarchy', config, vsBridgeClient),
+    cli.options.page,
+    cli.options.pageSize
   )
 }
 cli.command('add cms', () => {
@@ -713,7 +657,31 @@ function handleSignal (signal) {
 }
 
 // run application
-authToMagento((authResp) => {
-  AUTH_TOKEN = authResp.result
-  cli.parse(process.argv)
-})
+
+// function authToMagento (callback) {
+//   return vsBridgeClient.post(config.vsbridge['auth_endpoint']).type('json').send({
+//     username: config.vsbridge.auth.username,
+//     password: config.vsbridge.auth.password
+//   }).end((resp) => {
+//     if (resp.body && resp.body.code === 200) {
+//       console.log(`Magento auth token: ${resp.body.result}\n`)
+//       if (callback) {
+//         callback(resp.body)
+//       }
+//     } else {
+//       // todo log response code etc instead of whole resp object
+//       console.error(resp)
+//       console.error(resp.body)
+//     }
+//   })
+// }
+
+// vsBridgeClient.auth().then(response => {
+
+// })
+// authToMagento((authResp) => {
+//   MAGENTO_AUTH_TOKEN = authResp.result
+//   cli.parse(process.argv)
+// })
+
+cli.parse(process.argv)
