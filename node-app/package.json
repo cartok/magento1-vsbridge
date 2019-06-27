@@ -30,7 +30,6 @@
     "url-parse": "^1.2.0",
     "valid-url": "^1.0.9"
   },
-  "devDependencies": {},
   "scripts": {
     "restore": "node node_modules/elasticdump/bin/elasticdump --input=var/catalog.json --output=http://localhost:9200/vue_storefront_magento1",
     "dump": "node node_modules/elasticdump/bin/elasticdump --output=var/catalog.json --input=http://localhost:9200/vue_storefront_magento1"
