@@ -2,10 +2,11 @@ const BasicImporter = require('./basic')
 
 class VSBridgeImporter extends BasicImporter {
   constructor (entityType, config, api) {
+    super(entityType, config, api)
     if (!config.vsbridge[entityType + '_endpoint']) {
-      console.error('No endpoint defined for ' + entityType)
-      return
+      throw new Error('No endpoint defined for ' + entityType)
     }
-    super(entityType, customImporter, config, api, db)
   }
 }
+
+module.exports = VSBridgeImporter
