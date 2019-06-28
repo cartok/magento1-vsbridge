@@ -1,25 +1,30 @@
-// if this will not be used as npm module we could get rid of
-// the 'config' constructor parameter or even the whole class
 const unirest = require('unirest')
 const config = require('../../config/config.json')
 
+function getShortUnirestErrorInfo (response) {
+  const { code, status, statusType, info, ok, error, body: { result } } = response
+  return { code, status, statusType, info, ok, error, result }
+}
+
 class VsBridgeClient {
   constructor (config) {
-    if (!config.vsbridge.apiKey || !config.vsbridge.url) {
-      throw Error('apiKey and url are required config keys')
+    if (!config.vsbridge.url) {
+      throw new Error('Missing config.key: vsbridge.url.')
     }
-    this.apiKey = config.vsbridge.apiKey
-    // this.token = ??? how is auth working really?
-    this.baseUrl = `${config.url}/vsbridge`
+    this.config = config
     this.client = unirest
-    this.auth()
+    this.baseUrl = `${this.config.url}/vsbridge`
   }
 
-  _setupRequest (unirest) {
-    return unirest.headers({
-      'Accept': 'application/json',
-      'Content-Type': 'application/json'
-    }).strictSSL(!!config.vsbridge.ssl)
+  _setupRequest (request) {
+    // finish request configuration
+    return request
+      .headers({
+        'Accept': 'application/json',
+        'Content-Type': 'application/json'
+      })
+      .strictSSL(!!this.config.vsbridge.ssl)
+      .type('json')
   }
   _setupUrl (endpointUrl) {
     const url = `${endpointUrl}?apikey=${encodeURIComponent(this.apiKey)}`
@@ -27,27 +32,31 @@ class VsBridgeClient {
     return url
   }
 
-  // authWith (apiKey) {
-  //   console.log('auth with', apiKey)
-  //   this.apiKey = apiKey
-  // }
-  auth () {
-    const { auth_endpoint: endpoint, auth: { username, password } } = config.vsbridge
-    this.post(endpoint).type('json').send({
-      username,
-      password
-    }).end((resp) => {
-      if (resp.body && resp.body.code === 200 && resp.body.result) {
-        console.log(`Magento auth token: ${resp.body.result}\n`)
-        this.apiKey = resp.body.result
-      } else {
-        // @todo: log some more useful information from 'resp' object.
-        console.error({
-          code: resp.body.code,
-          result: resp.body.result
-        })
-        throw new Error('Magento Authentication failed.')
-      }
+  auth (callback) {
+    return new Promise((resolve, reject) => {
+      const { auth_endpoint: url, auth: { username, password } } = this.config.vsbridge
+      console.log('Authenticating to magento')
+      this.post(url).send({
+        username,
+        password
+      }).end((resp) => {
+        if (resp.body && resp.body.code === 200 && resp.body.result) {
+          const apiKey = resp.body.result
+          console.log(`Magento auth token: ${apiKey}.`)
+          this.apiKey = apiKey
+          resolve(apiKey)
+          // if (callback) {
+          //   callback(apiKey)
+          // }
+        } else {
+          console.error({
+            code: resp.body.code,
+            result: resp.body.result
+          })
+          reject(new Error('Could not get magento auth token.'))
+          // throw new Error('Could not get magento auth token.')
+        }
+      })
     })
   }
 
@@ -70,19 +79,14 @@ class VsBridgeClient {
    */
   getAttributeData () {
     return new Promise((resolve, reject) => {
-      console.log('*** Getting attribute data')
-      this.get(config.vsbridge['product_mapping_endpoint']).type('json').end((resp) => {
-        if (resp.body && resp.body.code !== 200) { // unauthroized request
-          console.log(resp.body.result)
-          process.exit(-1)
+      this.get(this.config.vsbridge['product_mapping_endpoint']).end((resp) => {
+        if (!resp.ok) {
+          console.error(getShortUnirestErrorInfo(resp))
+          reject(new Error('Something went wrong when requesting product mappings from magento.'))
         }
         resolve(resp.body.result)
-        reject(new Error('Attribute data not available now, please try again later'))
       })
-    }).then(
-      result => (result),
-      error => (error)
-    )
+    })
   }
 }
 

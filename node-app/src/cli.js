@@ -12,7 +12,6 @@ const vsBridgeClient = require('./clients/vsBridgeClient')
 const storyblokClient = require('./clients/storyblokClient')
 
 const config = require('../config/config.json')
-let MAGENTO_AUTH_TOKEN = ''
 
 const cli = CommandRouter()
 
@@ -66,7 +65,7 @@ cli.option({
   type: Boolean
 })
 
-// SB INTERFACE FUNCTION
+// STORYBLOK IMPORTER
 // @todo: test jsdoc, maybe go back to standard function param style with default values to be able to understand signature while function is folded.
 async function addPagesFromStoryblok (params = { index: null, type: undefined, page: 0, pageSize: 25 }) {
   // assign default params
@@ -110,7 +109,7 @@ async function addPagesFromStoryblok (params = { index: null, type: undefined, p
   try {
     const pages = storyblokResponse.data.stories
     pages.forEach(page => {
-      elasticClient.index({
+      elasticClient.client.index({
         index,
         type,
         id: page.uuid,
@@ -140,229 +139,12 @@ async function addPagesFromStoryblok (params = { index: null, type: undefined, p
     process.exit(-1)
   }
 }
-
-//
-async function getInfo () {
-  // get all indices and add 'id' and 'name' to every index.
-  const indices = (await elasticClient.cat.indices({ format: 'json' }))
-    .map(index => Object.assign(index, {
-      id: parseInt(index.index.replace(/.*?_(\d+)/, '$1')),
-      name: index.index
-    }))
-    .filter(index => index.name.startsWith(config.elasticsearch.indexName))
-
-  // add mapping to every index.
-  // @FRÜHSPORT!
-  // indices.reduce(async (i, index) => {
-  //     console.log({i})
-  //     console.log({index})
-  //     const mapping = await elasticClient.indices.getMapping({ index: index.index }) // using index.index even tho we add index.name
-  //     index = Object.assign(index, { mapping })
-  //     i.push(index)
-  //     return i
-  // }, Promise.resolve())
-  // indices.forEach(index => {
-  //     console.log({XXX: index.mapping})
-  //     console.log({name: index.name})
-  // })
-
-  // filter all indices that start with the name in the config
-  // and get the latest version (biggest number)
-  const latestId = Math.max(...indices
-    .filter(i => i.index.startsWith(config.elasticsearch.indexName))
-    .map(i => i.name)
-    .map(version => parseInt(version.replace(/^.*_(\d+)$/, '$1')))
-  )
-
-  // get whole data of the latest index
-  const latestIndex = indices.find(i => i.name.endsWith(`_${latestId}`))
-
-  // get aliases
-  // add name to index object, just for semantic
-  const aliases = (await elasticClient.cat.aliases({ format: 'json' }))
-    .map(alias => Object.assign(alias, { name: alias.index }))
-
-  return {
-    aliases,
-    indices: {
-      all: indices,
-      latest: Object.assign(latestIndex, {
-        isPublished: aliases.find(alias => alias.index === latestIndex.name) !== undefined
-      }),
-      aliased: aliases[0] // only one index may be aliased.
-    },
-    getIndex (idOrName) {
-      return indices.find(index => {
-        if (typeof idOrName === 'number') {
-          return index.id === idOrName
-        }
-        if (typeof idOrName === 'string') {
-          return index.name === idOrName
-        }
-      })
-    },
-    hasIndex (idOrName) {
-      return this.getIndex(idOrName) !== undefined
-    }
-  }
-}
-//
-async function setAlias (idOrName) {
-  return new Promise(async (resolve, reject) => {
-    const { id, name } = idOrName
-    if ((id && name) || !(id || name)) {
-      throw new Error('Either provide id or name.')
-    }
-
-    const index = id
-      ? `${config.elasticsearch.indexName}_${id}`
-      : name
-
-    const info = await getInfo()
-
-    // only one alias should exist, get a list of all aliases, filter, map to index name and delete their aliases.
-    info.aliases
-      .filter(alias => alias.alias === config.elasticsearch.indexName)
-      .map(alias => alias.index)
-      .forEach(async (index) => {
-        try {
-          const response = await elasticClient.indices.deleteAlias({
-            index,
-            name: config.elasticsearch.indexName
-          })
-          console.log('Index alias deleted', response)
-        } catch (e) {
-          console.log('Index alias does not exists', e.message)
-        }
-      })
-
-    try {
-      const response = await elasticClient.indices.putAlias({
-        index,
-        name: config.elasticsearch.indexName
-      })
-      console.log('Index alias created', response)
-      resolve(response)
-    } catch (e) {
-      console.log('Could not create alias', e.message)
-      reject(e)
-    }
-  })
-}
-//
-async function setAliasToLatestIndex () {
-  const info = await getInfo()
-  const index = info.indices.latest.name
-  console.log(`Setting alias to latest index: ${index}`)
-  return setAlias({ name: index })
-}
-// TO ES INTERFACE
-// test delete index function for error handling of elastic client, guess it uses fetch.
-// maybe i need to check the response.ok.
-// could use fetch-errors package for it aswell.
-async function deleteIndex (idOrName) {
-  const { id, name } = idOrName
-  if ((id && name) || !(id || name)) {
-    throw new Error('Either provide id or name.')
-  }
-
-  const index = id
-    ? `${config.elasticsearch.indexName}_${id}`
-    : name
-
-  try {
-    console.log(`Deleting index: ${index}.`)
-    const response = await elasticClient.indices.delete({ index })
-    console.log(`Successfully deleted index: ${index}.`)
-    return response
-  } catch (e) {
-    console.error(`Could not delete index '${index}'`)
-    return Promise.reject(e)
-  }
-}
-//
-async function reindexFromAliasedIndex () {
-  // reindexing references:
-  // https://medium.com/@eyaldahari/reindex-elasticsearch-documents-is-easier-than-ever-103f63d411c
-  // https://www.elastic.co/guide/en/elasticsearch/client/javascript-api/16.x/api-reference-5-6.html#api-indices-putmapping-5-6
-  // https://www.elastic.co/guide/en/elasticsearch/reference/5.6/docs-reindex.html
-
-  // create a new index and add current mappings
-  try {
-    await createIndexAndAddMappings()
-  } catch (e) {
-    console.error('Something went wrong in createIndexAndAddMappings, stopping execution.')
-    return Promise.reject(e)
-  }
-
-  // get info after creation of the destination index
-  const info = await getInfo()
-
-  const destIndexName = info.indices.latest.name
-  const sourceIndexName = info.indices.aliased.name
-
-  // fill the new index with data from the previous index
-  console.log(`Will reindex ${destIndexName} with documents from ${sourceIndexName}\n`)
-  try {
-    const response = await elasticClient.reindex({
-      timeout: '30m',
-      wait_for_completion: false, // return directly after starting task. else we get timeout here. the process will run in the background use 'elastic info' to check its state.
-      body: {
-        source: {
-          index: sourceIndexName
-        },
-        dest: {
-          index: destIndexName
-        }
-      }
-    })
-    console.log('Reindexing task was successfully triggered, check its state by using \'elastic info\' command', response)
-    setAliasToLatestIndex()
-    return Promise.resolve(response)
-  } catch (e) {
-    console.error('Something went wrong when trying to reindex. Deleting newly created index.')
-    console.error(e)
-    console.error(`Error: status: ${e.status}, message: ${e.message}, failures: ${e.failures}\n`)
-    await deleteIndex({ name: destIndexName })
-    return Promise.reject(e)
-  }
-}
-//
-// @todo: reduce logs here, unneded for elasticClient or elasticClient core functions?
-async function createIndexAndAddMappings () {
-  return new Promise(async (resolve, reject) => {
-    console.log('Will create a new index by increasing the id of the latest and adding the all mappings from the mappings directory to it.')
-    const info = await getInfo()
-    const indexName = `${config.elasticsearch.indexName}_${info.indices.latest.id + 1}`
-    // create index
-    try {
-      const response = await elasticClient.indices.create({ index: indexName })
-      console.log('Index created', response)
-    } catch (e) {
-      console.error('Could not create index')
-      console.error(e)
-      reject(e)
-    }
-    // add mappings
-    try {
-      const response = await elasticClient.putMappings(elasticClient, indexName)
-      console.log('Mappings added', response)
-    } catch (e) {
-      console.error('Could not add mapping')
-      console.error(e)
-      deleteIndex({ name: indexName })
-      reject(e)
-    }
-    resolve()
-  })
-}
-
-//
+// VSBRIDGE IMPORTER
 async function importListOf (entityType, importer, page = 0, pageSize = 100) {
   return new Promise(async (resolve, reject) => {
-    importer.api.authWith(MAGENTO_AUTH_TOKEN)
+    // importer.api.authWith(MAGENTO_AUTH_TOKEN)
 
-    const info = await getInfo()
+    const info = await elasticClient.info
     const query = {
       entityType: entityType,
       page: page,
@@ -370,7 +152,7 @@ async function importListOf (entityType, importer, page = 0, pageSize = 100) {
     }
 
     console.log('*** Getting objects list for', query)
-    importer.api.get(config.vsbridge[entityType + '_endpoint']).type('json').query(query).end((resp) => {
+    importer.api.get(config.vsbridge[entityType + '_endpoint']).query(query).end((resp) => {
       if (resp.body) {
         if (resp.body.code !== 200) { // unauthroized request
           console.log(resp)
@@ -385,7 +167,7 @@ async function importListOf (entityType, importer, page = 0, pageSize = 100) {
               let i = singleResults.length
               while (--i >= 0) {
                 const entry = singleResults[i]
-                elasticClient.index({
+                elasticClient.client.index({
                   index: `${config.elasticsearch.indexName}_${info.indices.latest.id}`,
                   type: entityType,
                   id: entry.id,
@@ -416,12 +198,12 @@ async function importListOf (entityType, importer, page = 0, pageSize = 100) {
 // add commands
 cli.command('info', async () => {
   // show info table
-  await elasticClient.cat.indices({ v: true }).then(res => {
+  await elasticClient.client.cat.indices({ v: true }).then(res => {
     console.log(res)
   })
 
   // show current
-  const info = await getInfo()
+  const info = await elasticClient.info
   console.log(`\nLatest index version is: ${info.indices.latest.id}.`)
 
   // show aliases
@@ -435,33 +217,33 @@ cli.command('info', async () => {
 
   // show tasks
   console.log('\nTasks:')
-  await elasticClient.cat.tasks({ detailed: true }).then(res => console.log(res))
+  await elasticClient.client.cat.tasks({ detailed: true }).then(res => console.log(res))
   console.log('Pending Tasks:')
-  await elasticClient.cat.pendingTasks({ v: true }).then(res => console.log(res))
+  await elasticClient.client.cat.pendingTasks({ v: true }).then(res => console.log(res))
 })
 
 cli.command('create index', () => {
-  createIndexAndAddMappings()
+  elasticClient.createIndexAndAddMappings()
 })
 
 cli.command('delete index', () => {
   const { id, name } = cli.options
-  deleteIndex({ id, name })
+  elasticClient.deleteIndex({ id, name })
 })
 cli.command('reindex', async () => {
-  reindexFromAliasedIndex()
+  elasticClient.reindexFromAliasedIndex()
 })
 
 cli.command('alias latest index', async () => {
-  setAliasToLatestIndex()
+  elasticClient.setAliasToLatestIndex()
 })
 cli.command('alias index', () => {
   const { id, name } = cli.options
-  setAliasToLatestIndex({ id, name })
+  elasticClient.setAliasToLatestIndex({ id, name })
 })
 // @todo: finish index selection + integration
 cli.command('select index', async () => {
-  const info = await getInfo()
+  const info = await elasticClient.info
   const { id, name, aliased } = cli.options
 
   let index
@@ -485,16 +267,16 @@ cli.command('select index', async () => {
   console.log(require('../../var/selected-index.json'))
 })
 cli.command('delete latest index', async () => {
-  const info = await getInfo()
-  deleteIndex({ name: info.indices.latest.name })
+  const info = await elasticClient.info
+  elasticClient.deleteIndex({ name: info.indices.latest.name })
 })
 
 cli.command('update latest index mappings', async () => {
-  const info = await getInfo()
+  const info = await elasticClient.info
   elasticClient.putMappings(elasticClient, info.indices.latest.name)
 })
 cli.command('update aliased index mappings', async () => {
-  const info = await getInfo()
+  const info = await elasticClient.info
   elasticClient.putMappings(elasticClient, info.indices.aliased.name)
 })
 cli.command('update mapping', () => {
@@ -503,21 +285,40 @@ cli.command('update mapping', () => {
   // if(!path){
   //     throw new Error('Execute put mapping with -f or --file <path> and pass a valid json file like in node-app/mappings.')
   // }
-  // elastic.putMappingsFromDirectory(elasticClient, path)
+  // elasticClient.putMappingsFromDirectory(elasticClient, path)
 })
-cli.command('foo', () => {
-  vsBridgeClient.getAttributeData()
+cli.command('foo', async () => {
+  try {
+    const response = await vsBridgeClient.getAttributeData()
+    console.log(response)
+  } catch (e) {
+    console.error(e)
+    process.exit(-1)
+  }
+})
+cli.command('bar', () => {
+  try {
+    vsBridgeClient.client.get(config.vsbridge.category_endpoint).query({
+      entityType: 'attribute',
+      page: 0,
+      pageSize: 1
+    }).end(response => {
+      const { code, status, statusType, info, ok, clientError, serverError, unauthorized, error, body: { result } } = response
+      console.log({ code, status, statusType, info, ok, clientError, serverError, unauthorized, error, result })
+    })
+  } catch (e) {
+    console.log(e)
+  }
 })
 // @todo: store getInfo result globally
 cli.command('add storyblok', async () => {
   const { page, pageSize } = cli.options
-  getInfo().then(info => {
-    addPagesFromStoryblok({
-      index: info.indices.latest.name,
-      type: 'cms_storyblok',
-      page,
-      pageSize
-    })
+  const info = await elasticClient.info
+  addPagesFromStoryblok({
+    index: info.indices.latest.name,
+    type: 'cms_storyblok',
+    page,
+    pageSize
   })
 })
 cli.command('add attributes', () => {
@@ -605,6 +406,7 @@ function showHelp () {
         { name: 'help | h | ', summary: 'show help' },
         { name: 'info', summary: 'show some info' },
         { name: 'create index', summary: 'creates a new index, adds current mappings' },
+        { name: 'alias index --id <number> | --name <string>', summary: 'sets THE alias to an index' },
         { name: 'reindex', summary: 'creates a new index, adds current mappings and uses the previous index to copy the documents from' },
         { name: 'delete index --id <number> | --name <string>', summary: 'deletes an index by id or name' },
         { name: 'delete latest index', summary: 'delete latest index' },
@@ -616,7 +418,8 @@ function showHelp () {
         { name: 'add taxrules', summary: 'add taxrules to the latest index' },
         { name: 'add categories', summary: 'add categories to the latest index' },
         { name: 'add products', summary: 'add products to the latest index' },
-        { name: 'add cms', summary: 'add cms to the latest index' }
+        { name: 'add cms', summary: 'add cms to the latest index' },
+        { name: 'add storyblok', summary: 'add storyblok pages to the latest index' }
       ]
     }
   ]))
@@ -637,49 +440,10 @@ cli.on('notfound', (action) => {
   showHelp()
   process.exit(1)
 })
-process.on('unhandledRejection', (reason, promise) => {
-  const { message, status } = promise
-  console.error('Unhandled Rejection:')
-  console.error(`${message}, status: ${status}, reason: ${reason}.`)
-  console.dir({ promise })
-})
-process.on('uncaughtException', function (exception) {
-  console.error('Uncaught Exception:')
-  console.dir({ exception })
-})
-process.on('SIGINT', handleSignal)
-process.on('SIGTERM', handleSignal)
-function handleSignal (signal) {
-  console.log('Received exit signal. Bye!')
-  process.exit(-1)
-}
 
-// run application
-
-// function authToMagento (callback) {
-//   return vsBridgeClient.post(config.vsbridge['auth_endpoint']).type('json').send({
-//     username: config.vsbridge.auth.username,
-//     password: config.vsbridge.auth.password
-//   }).end((resp) => {
-//     if (resp.body && resp.body.code === 200) {
-//       console.log(`Magento auth token: ${resp.body.result}\n`)
-//       if (callback) {
-//         callback(resp.body)
-//       }
-//     } else {
-//       // todo log response code etc instead of whole resp object
-//       console.error(resp)
-//       console.error(resp.body)
-//     }
-//   })
-// }
-
-// vsBridgeClient.auth().then(response => {
-
-// })
-// authToMagento((authResp) => {
-//   MAGENTO_AUTH_TOKEN = authResp.result
-//   cli.parse(process.argv)
-// })
-
-cli.parse(process.argv)
+// execute application
+;(async () => {
+  const magentoApiKey = await vsBridgeClient.auth()
+  console.log({ magentoApiKey })
+  cli.parse(process.argv)
+})()
