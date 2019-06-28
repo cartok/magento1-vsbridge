@@ -1,5 +1,5 @@
 const StoryblokClient = require('storyblok-js-client')
-const config = require('../../../config/config.json')
+const config = require('../../config/config.json')
 
 console.log(`Will auth to storyblok with token: ${config.storyblok.accessTokenPublished}`)
 

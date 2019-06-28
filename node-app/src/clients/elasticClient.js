@@ -2,7 +2,7 @@ const es = require('elasticsearch')
 const path = require('path')
 const filesystem = require('../lib/filesystem')
 const promise = require('../lib/promise')
-const config = require('../../../config/config.json')
+const config = require('../../config/config.json')
 
 class ElasticsearchClient {
   constructor (config) {

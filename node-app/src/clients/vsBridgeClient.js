@@ -1,7 +1,7 @@
 // if this will not be used as npm module we could get rid of
 // the 'config' constructor parameter or even the whole class
 const unirest = require('unirest')
-const config = require('../../../config/config.json')
+const config = require('../../config/config.json')
 
 class VsBridgeClient {
   constructor (config) {

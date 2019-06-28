@@ -11,7 +11,7 @@ const elasticClient = require('./clients/elasticClient')
 const vsBridgeClient = require('./clients/vsBridgeClient')
 const storyblokClient = require('./clients/storyblokClient')
 
-const config = require('../../config/config.json')
+const config = require('../config/config.json')
 let MAGENTO_AUTH_TOKEN = ''
 
 const cli = CommandRouter()
@@ -505,7 +505,9 @@ cli.command('update mapping', () => {
   // }
   // elastic.putMappingsFromDirectory(elasticClient, path)
 })
-
+cli.command('foo', () => {
+  vsBridgeClient.getAttributeData()
+})
 // @todo: store getInfo result globally
 cli.command('add storyblok', async () => {
   const { page, pageSize } = cli.options
