@@ -5,13 +5,13 @@ const config = require('../../config/config.json')
 
 class VsBridgeClient {
   constructor (config) {
-    if (!this.config.vsbridge.apiKey || !this.config.vsbridge.url) {
-      throw Error('apiKey and url are required this.config keys')
+    if (!config.vsbridge.apiKey || !config.vsbridge.url) {
+      throw Error('apiKey and url are required config keys')
     }
-    this.apiKey = this.config.vsbridge.apiKey
-    this.baseUrl = `${this.config.url}/vsbridge`
+    this.apiKey = config.vsbridge.apiKey
+    // this.token = ??? how is auth working really?
+    this.baseUrl = `${config.url}/vsbridge`
     this.client = unirest
-    // this.token =
     this.auth()
   }
 
@@ -19,7 +19,7 @@ class VsBridgeClient {
     return unirest.headers({
       'Accept': 'application/json',
       'Content-Type': 'application/json'
-    }).strictSSL(!!this.config.vsbridge.ssl)
+    }).strictSSL(!!config.vsbridge.ssl)
   }
   _setupUrl (endpointUrl) {
     const url = `${endpointUrl}?apikey=${encodeURIComponent(this.apiKey)}`
@@ -32,7 +32,7 @@ class VsBridgeClient {
   //   this.apiKey = apiKey
   // }
   auth () {
-    const { auth_endpoint: endpoint, auth: { username, password } } = this.config.vsbridge
+    const { auth_endpoint: endpoint, auth: { username, password } } = config.vsbridge
     this.post(endpoint).type('json').send({
       username,
       password
@@ -71,7 +71,7 @@ class VsBridgeClient {
   getAttributeData () {
     return new Promise((resolve, reject) => {
       console.log('*** Getting attribute data')
-      this.get(this.config.vsbridge['product_mapping_endpoint']).type('json').end((resp) => {
+      this.get(config.vsbridge['product_mapping_endpoint']).type('json').end((resp) => {
         if (resp.body && resp.body.code !== 200) { // unauthroized request
           console.log(resp.body.result)
           process.exit(-1)
