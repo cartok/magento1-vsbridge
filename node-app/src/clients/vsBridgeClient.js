@@ -27,34 +27,33 @@ class VsBridgeClient {
       .type('json')
   }
   _setupUrl (endpointUrl) {
-    const url = `${endpointUrl}?apikey=${encodeURIComponent(this.apiKey)}`
-    console.log('Fetching data from', url)
+    let url = endpointUrl
+    if (this.apiKey) {
+      url += `?apikey=${encodeURIComponent(this.apiKey)}`
+    }
+    console.log('\n> Will fetch from:', url)
     return url
   }
 
   auth (callback) {
     return new Promise((resolve, reject) => {
       const { auth_endpoint: url, auth: { username, password } } = this.config.vsbridge
-      console.log('Authenticating to magento')
+      console.log('\n> Authenticating with magento.')
       this.post(url).send({
         username,
         password
       }).end((resp) => {
         if (resp.body && resp.body.code === 200 && resp.body.result) {
           const apiKey = resp.body.result
-          console.log(`Magento auth token: ${apiKey}.`)
+          console.log(`> Authenticated, token: ${apiKey}.\n`)
           this.apiKey = apiKey
           resolve(apiKey)
-          // if (callback) {
-          //   callback(apiKey)
-          // }
         } else {
           console.error({
             code: resp.body.code,
             result: resp.body.result
           })
           reject(new Error('Could not get magento auth token.'))
-          // throw new Error('Could not get magento auth token.')
         }
       })
     })
@@ -81,8 +80,10 @@ class VsBridgeClient {
     return new Promise((resolve, reject) => {
       this.get(this.config.vsbridge['product_mapping_endpoint']).end((resp) => {
         if (!resp.ok) {
-          console.error(getShortUnirestErrorInfo(resp))
-          reject(new Error('Something went wrong when requesting product mappings from magento.'))
+          console.log(getShortUnirestErrorInfo(resp))
+          const error = new Error('Something went wrong when requesting product mappings from magento.')
+          reject(error)
+          throw error
         }
         resolve(resp.body.result)
       })

@@ -10,15 +10,15 @@ jsonFile.writeFileSync(
   objectAssignDeep(defaultConfig, customConfig)
 )
 
-process.on('unhandledRejection', (reason, promise) => {
-  const { message, status } = promise
-  console.error('Unhandled Rejection:')
-  console.error(`${message}, status: ${status}, reason: ${reason}.`)
-  console.dir(promise)
+process.on('unhandledRejection', (error, promise) => {
+  console.error('\n> nodejs-event: Unhandled Promise Rejection!\n')
+  console.log(error, promise)
+  console.log('\n')
 })
-process.on('uncaughtException', function (exception) {
-  console.error('Uncaught Exception:', exception)
-  console.dir(exception)
+process.on('\n>uncaughtException', error => {
+  console.error('nodejs-event: Uncaught Exception!\n')
+  console.log({ error })
+  console.log('\n')
 })
 process.on('SIGINT', () => process.exit(-1))
 process.on('SIGTERM', () => process.exit(-1))
