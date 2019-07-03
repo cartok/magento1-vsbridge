@@ -1,12 +1,16 @@
 async function execPromiseReturningFunctionsSequential (promises) {
-  for (let promise of promises) {
-    try {
-      await promise()
-    } catch (error) {
-      // @todo: add msg
-      throw error
+  return new Promise(async (resolve, reject) => {
+    for (let promise of promises) {
+      try {
+        await promise()
+      } catch (error) {
+        console.log('\n> Some of the sequential processed promises failed.')
+        reject(error)
+        return
+      }
     }
-  }
+    resolve(promises)
+  })
 }
 
 async function execPromiseReturningFunctionsParallel (promises) {

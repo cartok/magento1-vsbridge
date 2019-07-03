@@ -1,5 +1,7 @@
 const unirest = require('unirest')
 const config = require('../../config/config.json')
+const util = require('util')
+const setTimeoutPromise = util.promisify(setTimeout)
 
 function getShortUnirestErrorInfo (response) {
   const { code, status, statusType, info, ok, error, body: { result } } = response
@@ -14,8 +16,9 @@ class VsBridgeClient {
     this.config = config
     this.client = unirest
     this.baseUrl = `${this.config.url}/vsbridge`
-    this.maxDNSResolveRetrys = 5
+    this.maxDNSResolveRetrys = 6
     this.DNSResolveRetrys = 0
+    this.waitTimeBeforeRetryMS = 5000
   }
 
   _setupRequest (request) {
@@ -74,7 +77,7 @@ class VsBridgeClient {
   getDocuments (query) {
     const { type, page, pageSize } = query
     return new Promise((resolve, reject) => {
-      this.get(this.config.vsbridge[`${type}_endpoint`]).query({ entityType: type, page, pageSize }).end(resp => {
+      this.get(this.config.vsbridge[`${type}_endpoint`]).query({ entityType: type, page, pageSize }).end(async resp => {
         if (!this.responseOk(resp)) {
           // retry on dns lookup error
           if (resp.error.code === 'EAI_AGAIN') {
@@ -82,9 +85,14 @@ class VsBridgeClient {
             if (this.DNSResolveRetrys < this.maxDNSResolveRetrys) {
               this.DNSResolveRetrys += 1
               console.warn(`\n> Will try again. (${this.DNSResolveRetrys}/${this.maxDNSResolveRetrys})`)
+              // wait some before trying again
+              // if (this.DNSResolveRetrys === 1) {
+              console.log(`\n> Waiting for ${this.waitTimeBeforeRetryMS / 1000} seconds before starting to try again.`)
+              await setTimeoutPromise(this.waitTimeBeforeRetryMS)
+              // }
               return this.getDocuments(query)
             }
-            console.warn(`\n> Aborting after '${this.maxDNSResolveRetrys} trys.'`)
+            console.warn(`\n> Aborting after ${this.maxDNSResolveRetrys} trys.`)
           }
           console.log(`\n> Could not get '${type}'.`)
           console.log(resp.error)

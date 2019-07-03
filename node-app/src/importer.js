@@ -27,6 +27,7 @@ async function importDocuments (params = { client: undefined, index: undefined, 
     }
 
     await elasticClient.insertDocuments({
+    // elasticClient.insertDocuments({
       index,
       type,
       documents
@@ -46,10 +47,8 @@ async function importDocuments (params = { client: undefined, index: undefined, 
 
     importDocuments({ client: endpointClient, index, type, page: page + 1, pageSize })
   } catch (error) {
-    console.log(`\n> Could not request documents with '${endpointClient.constructor.name}' and add them to elastic index.`)
-    console.log('> Documents from endpoint:')
-    console.log(documents)
-    throw error
+    console.log(`> Number of documents from endpoint: ${documents.length}`)
+    console.log(`> Current page: ${page}\n`)
   }
 }
 

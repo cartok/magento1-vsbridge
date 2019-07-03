@@ -84,9 +84,12 @@ async function getIndexUsingCliOptions (options) {
   }
 
   // as default use the selected index (if any).
-  if (!index) {
-    index = info.indices.selected
+  if (!id && !name && !latest && !selected) {
+    if (info.indices.selected) {
+      index = info.indices.selected
+    }
   }
+
   if (!index) {
     showHelp()
     console.log(`\n> Either the index you wanted to use does not exist or you did not use this command properly. This message also apears if no index is selected, please select some index first.\n`)
@@ -98,81 +101,108 @@ async function getIndexUsingCliOptions (options) {
 
 // add commands
 cli.command('info', async () => {
-  // show info table
-  await elasticClient.client.cat.indices({ v: true }).then(res => {
-    console.log(res)
-  })
+  try {
+    // show info table
+    await elasticClient.client.cat.indices({ v: true }).then(res => {
+      console.log(res)
+    })
 
-  // show current
-  const info = await elasticClient.info
-  if (info.hasIndex()) {
-    console.log(`> Latest index version is: ${info.indices.latest.id}`)
+    // show current
+    const info = await elasticClient.info
+    if (info.hasIndex()) {
+      console.log(`> Latest index version: ${info.indices.latest.id}`)
+    }
+
+    // show aliases
+    if (info.hasAlias()) {
+      console.log(`> Aliased index version: ${info.indices.aliased.id}`)
+    } else {
+      console.log(`> No alias defined. Use the cli to set one.`)
+    }
+
+    // show selected index
+    if (info.hasIndex()) {
+      console.log(`> Selected index version: ${info.indices.selected.id}`)
+    }
+
+    // show tasks
+    console.log('\nTasks:')
+    await elasticClient.client.cat.tasks({ detailed: true }).then(res => console.log(res))
+    console.log('Pending Tasks:')
+    await elasticClient.client.cat.pendingTasks({ v: true }).then(res => console.log(res))
+  } catch (error) {
+    console.error(error)
   }
-
-  // show aliases
-  if (info.hasAlias()) {
-    console.log(`> Aliased index version is: ${info.indices.aliased.id}`)
-  } else {
-    console.log(`> No alias defined. Use the cli to set one.`)
-  }
-
-  // show selected index
-  if (info.hasIndex()) {
-    console.log(`> Selected index version is: ${info.indices.selected.id}`)
-  }
-
-  // show tasks
-  console.log('\nTasks:')
-  await elasticClient.client.cat.tasks({ detailed: true }).then(res => console.log(res))
-  console.log('Pending Tasks:')
-  await elasticClient.client.cat.pendingTasks({ v: true }).then(res => console.log(res))
 })
-cli.command('create index', () => {
-  // @todo: either dont add mappings directly using the default mappings directory,
-  // or add handle directory cli param + augment the method below.
-  if (cli.options.path) {
-    console.warn('\n> Using a path to use mappings from is not finally implemented.')
-    process.exit(126)
+cli.command('create index', async () => {
+  try {
+    // @todo: either dont add mappings directly using the default mappings directory,
+    // or add handle directory cli param + augment the method below.
+    if (cli.options.path) {
+      console.warn('\n> Using a path to use mappings from is not finally implemented.')
+      process.exit(126)
+    }
+    await elasticClient.createNextIndexAndAddMappings()
+  } catch (error) {
+    console.error(error)
   }
-  elasticClient.createNextIndexAndAddMappings()
 })
-// @todo: add delete alias command and ES client method
 cli.command('delete index', async () => {
-  const index = await getIndexUsingCliOptions(cli.options)
-  elasticClient.deleteIndex(index.name)
+  try {
+    const index = await getIndexUsingCliOptions(cli.options)
+    elasticClient.deleteIndex(index.name)
+  } catch (error) {
+    console.error(error)
+  }
 })
 cli.command('delete all indices', async () => {
-  elasticClient.deleteAllIndices()
+  try {
+    await elasticClient.deleteAllIndices()
+  } catch (error) {
+    console.error(error)
+  }
 })
 cli.command('normalize index ids', async () => {
-  console.warn('--- not implemented ---')
-  process.exit(126)
-  elasticClient.normalizeIndexIds()
-})
-cli.command('reindex from', async () => {
-  // @todo: handle path
-  if (cli.options.path) {
-    console.warn('\n> Using a path to use mappings from is not finally implemented.')
+  try {
+    console.warn('--- not implemented ---')
     process.exit(126)
+    await elasticClient.normalizeIndexIds()
+  } catch (error) {
+    console.error(error)
   }
-  const index = await getIndexUsingCliOptions(cli.options)
-  elasticClient.reindexFrom(index.name)
+})
+cli.command('reindex', async () => {
+  try {
+    // @todo: handle path
+    if (cli.options.path) {
+      console.warn('\n> Using a path to use mappings from is not finally implemented.')
+      process.exit(126)
+    }
+    const index = await getIndexUsingCliOptions(cli.options)
+    await elasticClient.reindexFrom(index.name)
+  } catch (error) {
+    console.error(error)
+  }
 })
 cli.command('update mappings', async () => {
-  const index = await getIndexUsingCliOptions(cli.options)
-  const { path } = cli.options
-  if (path) {
-    console.warn('\n> Using a path to use mappings from is not tested.')
-    process.exit(126)
-    elasticClient.putMappingsFromDirectory(index.name, path)
-  } else {
-    elasticClient.putMappings(index.name)
+  try {
+    const index = await getIndexUsingCliOptions(cli.options)
+    const { path } = cli.options
+    if (path) {
+      console.warn('\n> Using a path to use mappings from is not tested.')
+      process.exit(126)
+      await elasticClient.putMappingsFromDirectory(index.name, path)
+    } else {
+      await elasticClient.putMappings(index.name)
+    }
+  } catch (error) {
+    console.log(error)
   }
 })
 cli.command('select index', async () => {
   const index = await getIndexUsingCliOptions(cli.options)
-  // save selected index info to file.
   try {
+    // save selected index info to file.
     jsonFile.writeFileSync(path.resolve(__dirname, '../var/selected-index.json'), {
       'name': index.name,
       'id': index.id
@@ -185,58 +215,79 @@ cli.command('select index', async () => {
     throw error
   }
 })
-cli.command('set alias on', async () => {
-  const index = await getIndexUsingCliOptions(cli.options)
-  elasticClient.setAlias(index.name)
+cli.command('alias index', async () => {
+  try {
+    const index = await getIndexUsingCliOptions(cli.options)
+    await elasticClient.setAlias(index.name)
+  } catch (error) {
+    console.error(error)
+  }
 })
 
 cli.command('add attributes', async () => {
-  const index = await getIndexUsingCliOptions(cli.options)
-  const { page, pageSize } = cli.options
-  importer.importDocuments({
-    client: vsBridgeClient,
-    index: index.name,
-    type: 'attribute',
-    page,
-    pageSize
-  })
+  try {
+    const index = await getIndexUsingCliOptions(cli.options)
+    const { page, pageSize } = cli.options
+    await importer.importDocuments({
+      client: vsBridgeClient,
+      index: index.name,
+      type: 'attribute',
+      page,
+      pageSize
+    })
+  } catch (error) {
+    console.error(error)
+  }
 })
 cli.command('add taxrules', async () => {
-  const index = await getIndexUsingCliOptions(cli.options)
-  const { page, pageSize } = cli.options
-  importer.importDocuments({
-    client: vsBridgeClient,
-    index: index.name,
-    type: 'taxrule',
-    page,
-    pageSize
-  })
+  try {
+    const index = await getIndexUsingCliOptions(cli.options)
+    const { page, pageSize } = cli.options
+    await importer.importDocuments({
+      client: vsBridgeClient,
+      index: index.name,
+      type: 'taxrule',
+      page,
+      pageSize
+    })
+  } catch (error) {
+    console.error(error)
+  }
 })
 cli.command('add categories', async () => {
-  const index = await getIndexUsingCliOptions(cli.options)
-  const { page, pageSize } = cli.options
-  importer.importDocuments({
-    client: vsBridgeClient,
-    index: index.name,
-    type: 'category',
-    page,
-    pageSize
-  })
+  try {
+    const index = await getIndexUsingCliOptions(cli.options)
+    const { page, pageSize } = cli.options
+    await importer.importDocuments({
+      client: vsBridgeClient,
+      index: index.name,
+      type: 'category',
+      page,
+      pageSize
+    })
+  } catch (error) {
+    console.error(error)
+  }
 })
 cli.command('add products', async () => {
-  const index = await getIndexUsingCliOptions(cli.options)
-  const { page, pageSize } = cli.options
-  importer.importDocuments({
-    client: vsBridgeClient,
-    index: index.name,
-    type: 'product',
-    page,
-    pageSize
-  })
+  try {
+    const index = await getIndexUsingCliOptions(cli.options)
+    const { page, pageSize } = cli.options
+    await importer.importDocuments({
+      client: vsBridgeClient,
+      index: index.name,
+      type: 'product',
+      page,
+      pageSize
+    })
+  } catch (error) {
+    console.error(error)
+  }
 })
 cli.command('add cms', async () => {
   const index = await getIndexUsingCliOptions(cli.options)
   const { page, pageSize } = cli.options
+  const { pages, blocks, hierarchy } = cli.options
   function importCmsPages () {
     return importer.importDocuments({
       client: vsBridgeClient,
@@ -264,29 +315,36 @@ cli.command('add cms', async () => {
       pageSize
     })
   }
-  const { pages, blocks, hierarchy } = cli.options
-  if (pages) {
-    importCmsPages()
-  } else if (blocks) {
-    importCmsBlocks()
-  } else if (hierarchy) {
-    importCmsHierarchy()
-  } else {
-    importCmsPages()
-    importCmsBlocks()
-    importCmsHierarchy()
+  try {
+    if (pages) {
+      await importCmsPages()
+    } else if (blocks) {
+      await importCmsBlocks()
+    } else if (hierarchy) {
+      await importCmsHierarchy()
+    } else {
+      await importCmsPages()
+      await importCmsBlocks()
+      await importCmsHierarchy()
+    }
+  } catch (error) {
+    console.error(error)
   }
 })
 cli.command('add storyblok', async () => {
-  const index = await getIndexUsingCliOptions(cli.options)
-  const { page, pageSize } = cli.options
-  importer.importDocuments({
-    client: storyblokClient,
-    index: index.name,
-    type: 'cms_storyblok',
-    page,
-    pageSize
-  })
+  try {
+    const index = await getIndexUsingCliOptions(cli.options)
+    const { page, pageSize } = cli.options
+    importer.importDocuments({
+      client: storyblokClient,
+      index: index.name,
+      type: 'cms_storyblok',
+      page,
+      pageSize
+    })
+  } catch (error) {
+    console.error(error)
+  }
 })
 
 const commandLineUsage = require('command-line-usage')
@@ -303,11 +361,11 @@ function showHelp () {
         { name: 'help | h | ', summary: 'show help' },
         { name: 'info', summary: 'show elastic info' },
         { name: 'create index', summary: 'creates a new index and adds mappings' },
-        { name: 'reindex from', summary: 'creates a new index, adds mappings and reindexes it from some given index' },
+        { name: 'reindex', summary: 'creates a new index, adds mappings and reindexes it from some given index' },
         { name: 'delete index', summary: 'deletes some index' },
         { name: 'update mappings ', summary: 'updates all mappings of some index' },
         { name: 'select index', summary: 'select some index' },
-        { name: 'set alias on', summary: 'set alias on some index' },
+        { name: 'alias index', summary: 'set alias for some index' },
         { name: 'add attributes', summary: 'add attributes to some index' },
         { name: 'add taxrules', summary: 'add taxrules to some index' },
         { name: 'add categories', summary: 'add categories to some index' },
@@ -335,6 +393,27 @@ cli.command('fail', async () => {
   } catch (error) {
     console.error(error)
     process.exit(-1)
+  }
+})
+// this command is only for test purposes
+const util = require('util')
+const setTimeoutPromise = util.promisify(setTimeout)
+cli.command('test', async () => {
+  try {
+    console.log('start')
+    console.log('timeout 1 start...')
+    await setTimeoutPromise(2000)
+    console.log('timeout 1 end...')
+    await new Promise((resolve, reject) => {
+      console.log('timeout 2 start...')
+      setTimeout(() => {
+        console.log('timeout 2 end...')
+        resolve()
+      }, 2000)
+    })
+    console.log('end')
+  } catch (error) {
+    console.error(error)
   }
 })
 

@@ -85,6 +85,9 @@
   "lw_power_input": {
     "type": "keyword"
   },
+  "lw_certification": {
+    "type": "keyword"
+  },
   "configurable_children": {
     "properties": {
       "has_options": {
@@ -97,6 +100,9 @@
         "type": "keyword"
       },
       "lw_smart_home_system": {
+        "type": "keyword"
+      },
+      "lw_certification": {
         "type": "keyword"
       }
     }

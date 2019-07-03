@@ -6,6 +6,18 @@ const config = require('../../config/config.json')
 
 // @todo: refactor methods that use 'idOrName' object with a generalized argument type check
 // to determine whether its an index name (string) or an index id.
+class ElasticError {
+  constructor (error) {
+    const { status, displayName, message, path, response } = error
+    return {
+      status,
+      displayName,
+      message,
+      path,
+      response
+    }
+  }
+}
 class ElasticsearchClient {
   constructor (config) {
     const { host, apiVersion } = config.elasticsearch
@@ -96,6 +108,7 @@ class ElasticsearchClient {
     const { list: indices, aliased, selected } = info.indices
 
     // save id of selected and aliased index
+    // eslint-disable-next-line no-unused-vars
     const specialIds = {
       aliased: aliased.id,
       selected: selected.id
@@ -115,6 +128,7 @@ class ElasticsearchClient {
     })
 
     // create a map that assigns the id of every index to its 'future' id.
+    // eslint-disable-next-line no-unused-vars
     const indexIdChangeMap = sortedIndexIds.reduce((map, id, newPosition) => {
       const oldId = unsortedIndexIds.find(oldId => oldId === id)
       if (!oldId) {
@@ -139,7 +153,7 @@ class ElasticsearchClient {
         : `${config.elasticsearch.indexName}_1`
       // create index
       try {
-        await this.createIndex({ name: indexName })
+        await this.createIndex(indexName)
       } catch (error) {
         reject(error)
         return
@@ -150,7 +164,7 @@ class ElasticsearchClient {
       } catch (error) {
         // additional catch to delete index if mapping went wrong.
         console.log('\n> Mapping went wrong, will delete created index.\n')
-        this.deleteIndex({ name: indexName })
+        this.deleteIndex(indexName)
         reject(error)
         return
       }
@@ -158,22 +172,13 @@ class ElasticsearchClient {
     })
   }
 
-  async createIndex (idOrName) {
-    const { id, name } = idOrName
-    if ((id && name) || !(id || name)) {
-      throw new Error('Either provide id or name.')
-    }
-    const indexName = id
-      ? `${config.elasticsearch.indexName}_${id}`
-      : name
-
+  async createIndex (indexName) {
     try {
       const response = await this.client.indices.create({ index: indexName })
       if (!response.acknowledged) {
         throw new Error('Error from elastic. Could not create index.')
       }
-      console.log('\n> Index created')
-      console.log(response)
+      console.log('\n> Index created.')
     } catch (error) {
       throw error
     }
@@ -195,10 +200,11 @@ class ElasticsearchClient {
     const info = await this.info
     const destIndexName = info.indices.latest.name
     const sourceIndexName = indexName
-    console.log(`\n> Will reindex ${destIndexName} with documents from ${sourceIndexName}\n`)
+    console.log(`\n> Will reindex ${destIndexName} with documents from ${sourceIndexName}`)
     try {
+      // @todo: better configuration (requests_per_second etc.)
+      // https://www.elastic.co/guide/en/elasticsearch/reference/5.4/docs-reindex.html
       const response = await this.client.reindex({
-        timeout: '30m',
         wait_for_completion: false, // return directly after starting task. else we get timeout here. the process will run in the background use 'elastic info' to check its state.
         body: {
           source: {
@@ -209,29 +215,19 @@ class ElasticsearchClient {
           }
         }
       })
-      if (!response.acknowledged) {
+      if (!(response && response.task)) {
+        console.log(response)
         throw new Error('Error from elastic. Could not start reindexing.')
       }
-      console.log(`\n> Reindexing task was successfully triggered, check its updating state by using 'elastic info' command.`)
-      console.log(response)
-      // update alias
-      await this.setAliasToLatestIndex()
+      console.log(`> Reindexing task was successfully triggered, check its updating state by using 'elastic info' command. ES Task: '${response.task}'`)
     } catch (error) {
       // delete index on error
       console.error('\n> Something went wrong when trying to reindex. Deleting newly created index.')
-      await this.deleteIndex({ name: destIndexName })
+      await this.deleteIndex(indexName)
       throw error
     }
   }
-  async deleteIndex (idOrName) {
-    const { id, name } = idOrName
-    if ((id && name) || !(id || name)) {
-      throw new Error('Either provide id or name.')
-    }
-    const indexName = id
-      ? `${config.elasticsearch.indexName}_${id}`
-      : name
-
+  async deleteIndex (indexName) {
     try {
       console.log(`\n> Deleting index: ${indexName}.`)
       const response = await this.client.indices.delete({ index: indexName })
@@ -244,12 +240,12 @@ class ElasticsearchClient {
       throw error
     }
   }
-  async deleteAllIndices (idOrName) {
+  async deleteAllIndices (indexName) {
     const info = await this.info
 
     const promises = info.indices.list.map(index => () => new Promise(async (resolve, reject) => {
       try {
-        await this.deleteIndex({ name: index.name })
+        await this.deleteIndex(index.name)
         resolve('index deleted')
       } catch (error) {
         // @todo: add msg
@@ -266,16 +262,24 @@ class ElasticsearchClient {
   }
   async insertDocument (params = { index: '', type: '', id: -1, document: {}, idx: -1 }) {
     const { index, type, id, document, idx } = params
-    const response = await this.client.index({
-      index,
-      type,
-      id,
-      body: document
-    })
-    if (response._shards.failed > 0) {
-      throw new Error(`From elastic client: Something went wrong when trying to add pages to '${index}'.`)
+    try {
+      const response = await this.client.index({
+        index,
+        type,
+        id,
+        body: document
+      })
+      // this check is not about bad mapping. mapping errors occur in the outer catch of this method.
+      // documents with bad mapping will still get added.
+      if (response._shards.failed > 0) {
+        throw new Error(`Could not add document to '${index}'.`)
+      }
+      console.log('* Record done for', id, index, idx)
+    } catch (error) {
+      console.log(`\n> Elastic returned some error:`)
+      console.error(new ElasticError(error))
+      throw error
     }
-    console.log('* Record done for', id, index, idx)
   }
   // @todo: use ES bulk api instead
   async insertDocuments (params = { index: '', type: '', documents: [{}] }) {
@@ -293,22 +297,24 @@ class ElasticsearchClient {
       }
     }))
 
-    try {
-      if (config.elasticsearch.insertDocumentsSequentially) {
-        await promise.execPromiseReturningFunctionsSequential(promises)
-      } else {
-        await promise.execPromiseReturningFunctionsParallel(promises)
+    return new Promise(async (resolve, reject) => {
+      try {
+        if (config.elasticsearch.insertDocumentsSequentially) {
+          await promise.execPromiseReturningFunctionsSequential(promises)
+        } else {
+          await promise.execPromiseReturningFunctionsParallel(promises)
+        }
+        resolve('documents inserted')
+      } catch (error) {
+        reject(error)
       }
-    } catch (error) {
-      console.log(`\n> Could not completely add pages to index '${index}'.`)
-      throw error
-    }
+    })
   }
 
   // @protected
   async putMapping (indexName, mapping) {
-    console.log(`\n> Will add mapping on index '${indexName}' for type '${mapping.type}'.`)
     try {
+      console.log(`\n> Will add mapping for '${mapping.type}' to '${indexName}'.`)
       const response = await this.client.indices.putMapping({
         updateAllTypes: true, // if multiple document types have a field with the same name, update the field type for every document to get no conflicts.
         index: indexName,
@@ -323,27 +329,33 @@ class ElasticsearchClient {
       console.log(`> Successfully put mapping for '${mapping.type}'.\n`)
       return response
     } catch (error) {
-      console.log('> Elasticsearch can only execute the following actions for existing mappings: add field, upgrade field to multi-field.')
-      console.log('> If you need to change some field use reindex.')
+      console.log('\n> Elasticsearch can only execute the following actions for existing mappings: add field, upgrade field to multi-field.')
+      console.log('> If you need to change some field use reindex.\n')
+      console.error(new ElasticError(error))
       throw error
     }
   }
   async putMappings (indexName, mappings) {
     // use default mapping path if no mappings are given
     mappings = mappings || filesystem.readMappingsFromDirectory(path.resolve(__dirname, '../../mappings'))
-    return new Promise((resolveAll, rejectAll) => {
-      promise.execPromiseReturningFunctionsSequential(Object.values(mappings).map(mapping => () => new Promise(async (resolve, reject) => {
-        try {
-          const response = await this.putMapping(indexName, mapping)
-          resolve(response)
-        } catch (error) {
-          reject(error)
-          rejectAll(error)
-        }
-      }))).then(res => {
+
+    const promises = Object.values(mappings).map(mapping => () => new Promise(async (resolve, reject) => {
+      try {
+        const response = await this.putMapping(indexName, mapping)
+        resolve(response)
+      } catch (error) {
+        reject(error)
+      }
+    }))
+
+    return new Promise(async (resolve, reject) => {
+      try {
+        await promise.execPromiseReturningFunctionsSequential(promises)
         console.log('\n> Mappings were added successfully.\n')
-        resolveAll('mappings added')
-      })
+        resolve('mappings added')
+      } catch (error) {
+        reject(new Error(`\n> Could not add all mappings.`))
+      }
     })
   }
   async putMappingsFromDirectory (indexName, absolutePath) {
@@ -374,8 +386,7 @@ class ElasticsearchClient {
               if (!response.acknowledged) {
                 throw new Error(`Error from elastic. Could not delete alias on index '${indexName}'.`)
               }
-              console.log('\n> Index alias deleted, response:')
-              console.log(response)
+              console.log('\n> Index alias deleted.')
             } catch (error) {
               reject(error)
               // throw again to exit loop
@@ -398,8 +409,7 @@ class ElasticsearchClient {
         if (!response.acknowledged) {
           throw new Error(`Error from elastic. Could not create alias on index '${indexName}'.`)
         }
-        console.log('\n> Index alias created, response:')
-        console.log(response)
+        console.log('\n> Index alias created.')
         resolve('alias created')
       } catch (error) {
         console.error(error)
