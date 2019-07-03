@@ -3,15 +3,11 @@ const CommandRouter = require('command-router')
 const path = require('path')
 const jsonFile = require('jsonfile')
 
-const promise = require('./lib/promise')
-
-const VsBridgeImporter = require('./importers/VsBridgeImporter')
+const importer = require('./importer')
 
 const elasticClient = require('./clients/elasticClient')
 const vsBridgeClient = require('./clients/vsBridgeClient')
 const storyblokClient = require('./clients/storyblokClient')
-
-const config = require('../config/config.json')
 
 const cli = CommandRouter()
 
@@ -65,132 +61,39 @@ cli.option({
   type: Boolean
 })
 
-// STORYBLOK IMPORTER
-// @todo: test jsdoc, maybe go back to standard function param style with default values to be able to understand signature while function is folded.
-async function addPagesFromStoryblok (params = { index: null, type: undefined, page: 0, pageSize: 25 }) {
-  // assign default params
-  const { index, type, page, pageSize } = Object.assign({
-    index: undefined,
-    type: undefined,
-    page: 0,
-    pageSize: 25
-  }, params)
-
-  // check required params
-  if (index === undefined || type === undefined) {
-    throw new Error(`You need to provide a valid 'index' and 'type' in the parameter object.`)
+async function getIndexUsingCliOptions (options) {
+  const { id, name, latest, selected } = cli.options
+  const info = await elasticClient.info
+  if (!info.hasIndex()) {
+    console.log(`\nNo index created yet.`)
+    process.exit(126)
   }
 
-  // the response is needed in next block
-  let storyblokResponse
-  try {
-    // make request to storyblok
-    // @note: guess we dont need a query, just 'starts_with' attribute that gets config.country value.
-    storyblokResponse = await storyblokClient.get('cdn/stories', {
-      version: 'published',
-      starts_with: `${config.country.toLowerCase()}/`,
-      filter_query: {
-        component: {
-          in: 'page,article'
-        }
-      },
-      page,
-      per_page: pageSize
-    })
-    if (!storyblokResponse.ok) {
-      throw new Error(`Error from storyblok. Could not get stories.`)
-    }
-  } catch (error) {
-    throw error
+  let index
+  if (id) {
+    index = info.getIndex(id)
+  }
+  if (name) {
+    index = info.getIndex(name)
+  }
+  if (latest) {
+    index = info.indices.latest
+  }
+  if (selected) {
+    index = info.indices.selected
   }
 
-  // @todo: move the elastic function to elasticClient.js
-  try {
-    // add pages to elastic index
-    const pages = storyblokResponse.data.stories
-    pages.forEach(async page => {
-      const response = await elasticClient.client.index({
-        index,
-        type,
-        id: page.uuid,
-        body: page
-      })
-      if (!response.acknowledged) {
-        throw new Error(`Something went wrong when trying to add pages to '${index}'.`)
-      }
-      console.log(`* Record done for id: ${page.uuid} index: ${index} pages: ${pageSize}`)
-    })
-
-    // stop recursion on an empty page
-    if (pages.length === 0) {
-      console.log('This was the last page.')
-      return
-    }
-
-    // continue recursion, starting at next page
-    addPagesFromStoryblok({
-      index,
-      type,
-      page: page + 1,
-      pageSize
-    })
-  } catch (error) {
-    console.error(error)
-    throw error
+  // as default use the selected index (if any).
+  if (!index) {
+    index = info.indices.selected
   }
-}
-// VSBRIDGE IMPORTER
-async function importListOf (entityType, importer, page = 0, pageSize = 100) {
-  return new Promise(async (resolve, reject) => {
-    const info = await elasticClient.info
-    const query = {
-      entityType: entityType,
-      page: page,
-      pageSize: pageSize
-    }
+  if (!index) {
+    showHelp()
+    console.log(`\n> Either the index you wanted to use does not exist or you did not use this command properly. This message also apears if no index is selected, please select some index first.\n`)
+    process.exit(126)
+  }
 
-    console.log('*** Getting objects list for', query)
-    importer.api.get(config.vsbridge[entityType + '_endpoint']).query(query).end((resp) => {
-      if (resp.body) {
-        if (resp.body.code !== 200) { // unauthroized request
-          console.log(resp)
-          process.exit(-1)
-        }
-        if (resp.body.result) {
-          const queue = []
-          let index = 0
-          for (let obj of resp.body.result) { // process single record
-            const promise = importer.single(obj).then((singleResults) => {
-              // store results
-              let i = singleResults.length
-              while (--i >= 0) {
-                const entry = singleResults[i]
-                elasticClient.client.index({
-                  index: `${config.elasticsearch.indexName}_${info.indices.latest.id}`,
-                  type: entityType,
-                  id: entry.id,
-                  body: entry
-                })
-              }
-              console.log('* Record done for ', obj.id, index, pageSize)
-              index++
-            })
-            if (cli.options.runSerial) { queue.push(() => promise) } else { queue.push(promise) }
-          }
-
-          let resultParser = (results) => {
-            console.log('** Page done ', page, resp.body.result.length)
-
-            if (resp.body.result.length === pageSize) {
-              console.log('*** Switching page!')
-              return importListOf(entityType, importer, config, vsBridgeClient, page + 1, pageSize)
-            }
-          }
-          if (cli.options.runSerial) { promise.serial(queue).then(resultParser).then((res) => resolve(res)).catch((reason) => { console.error(reason); reject(reason) }) } else { Promise.all(queue).then(resultParser).then((res) => resolve(res)).catch((reason) => { console.error(reason); reject(reason) }) }
-        }
-      }
-    })
-  })
+  return index
 }
 
 // add commands
@@ -202,16 +105,21 @@ cli.command('info', async () => {
 
   // show current
   const info = await elasticClient.info
-  console.log(`\nLatest index version is: ${info.indices.latest.id}.`)
+  if (info.hasIndex()) {
+    console.log(`> Latest index version is: ${info.indices.latest.id}`)
+  }
 
   // show aliases
-  if (!info.aliases || info.aliases.length === 0) {
-    console.log('No alias defined. Use \'alias latest index\' or \'alias index --id <number>\' to enable some index.')
+  if (info.hasAlias()) {
+    console.log(`> Aliased index version is: ${info.indices.aliased.id}`)
   } else {
-    console.log(`\nAlias ${info.aliases[0].alias} is set on ${info.aliases[0].index}.`)
+    console.log(`> No alias defined. Use the cli to set one.`)
   }
 
   // show selected index
+  if (info.hasIndex()) {
+    console.log(`> Selected index version is: ${info.indices.selected.id}`)
+  }
 
   // show tasks
   console.log('\nTasks:')
@@ -219,147 +127,143 @@ cli.command('info', async () => {
   console.log('Pending Tasks:')
   await elasticClient.client.cat.pendingTasks({ v: true }).then(res => console.log(res))
 })
-
 cli.command('create index', () => {
+  // @todo: either dont add mappings directly using the default mappings directory,
+  // or add handle directory cli param + augment the method below.
+  if (cli.options.path) {
+    console.warn('\n> Using a path to use mappings from is not finally implemented.')
+    process.exit(126)
+  }
   elasticClient.createNextIndexAndAddMappings()
 })
-
-cli.command('delete index', () => {
-  const { id, name } = cli.options
-  elasticClient.deleteIndex({ id, name })
+// @todo: add delete alias command and ES client method
+cli.command('delete index', async () => {
+  const index = await getIndexUsingCliOptions(cli.options)
+  elasticClient.deleteIndex(index.name)
 })
-cli.command('reindex', async () => {
-  elasticClient.reindexFromAliasedIndex()
+cli.command('delete all indices', async () => {
+  elasticClient.deleteAllIndices()
 })
-
-cli.command('alias latest index', async () => {
-  elasticClient.setAliasToLatestIndex()
+cli.command('normalize index ids', async () => {
+  console.warn('--- not implemented ---')
+  process.exit(126)
+  elasticClient.normalizeIndexIds()
 })
-cli.command('alias index', () => {
-  const { id, name } = cli.options
-  elasticClient.setAliasToLatestIndex({ id, name })
+cli.command('reindex from', async () => {
+  // @todo: handle path
+  if (cli.options.path) {
+    console.warn('\n> Using a path to use mappings from is not finally implemented.')
+    process.exit(126)
+  }
+  const index = await getIndexUsingCliOptions(cli.options)
+  elasticClient.reindexFrom(index.name)
 })
-// @todo: finish index selection + integration
+cli.command('update mappings', async () => {
+  const index = await getIndexUsingCliOptions(cli.options)
+  const { path } = cli.options
+  if (path) {
+    console.warn('\n> Using a path to use mappings from is not tested.')
+    process.exit(126)
+    elasticClient.putMappingsFromDirectory(index.name, path)
+  } else {
+    elasticClient.putMappings(index.name)
+  }
+})
 cli.command('select index', async () => {
-  const info = await elasticClient.info
-  const { id, name, aliased } = cli.options
-
-  let index
-  if (id) {
-    index = info.getIndex(id)
+  const index = await getIndexUsingCliOptions(cli.options)
+  // save selected index info to file.
+  try {
+    jsonFile.writeFileSync(path.resolve(__dirname, '../var/selected-index.json'), {
+      'name': index.name,
+      'id': index.id
+    }, { spaces: 2, EOL: '\n' })
+    console.log(`> Saved selected index information to file.`)
+    console.log(`> Index with id ${index.id} is now selected.`)
+  } catch (error) {
+    console.log(`> Could not write to file.`)
+    console.log(`> Index with id ${index.id} is not selected.`)
+    throw error
   }
-  if (name) {
-    index = info.getIndex(name)
-  }
-  if (aliased) {
-    index = info.indices.aliased
-  }
-
-  if (!index) {
-    throw new Error('Provide either \'--id <number>\', \'--name <string>\' or --aliased, to select an index.')
-  }
-  jsonFile.writeFileSync(path.resolve(__dirname, '../../var/selected-index.json'), {
-    'name': index.name,
-    'id': index.id
-  })
-  console.log(require('../../var/selected-index.json'))
 })
-cli.command('delete latest index', async () => {
-  const info = await elasticClient.info
-  elasticClient.deleteIndex({ name: info.indices.latest.name })
+cli.command('set alias on', async () => {
+  const index = await getIndexUsingCliOptions(cli.options)
+  elasticClient.setAlias(index.name)
 })
 
-cli.command('update mappings for index', async () => {
-  const info = await elasticClient.info
-  elasticClient.putMappings(elasticClient, info.indices.latest.name)
-})
-cli.command('update mappings for aliased index', async () => {
-  const info = await elasticClient.info
-  elasticClient.putMappings(elasticClient, info.indices.aliased.name)
-})
-// @todo:
-cli.command('update mappings for selected index', async () => {
-  // const info = await elasticClient.info
-  // elasticClient.putMappings(elasticClient, info.indices.aliased.name)
-})
-// @todo:
-cli.command('update mappings for', () => {
-  console.log('index selection not implemented.')
-  // const { path } = cli.options
-  // if(!path){
-  //     throw new Error('Execute put mapping with -f or --file <path> and pass a valid json file like in node-app/mappings.')
-  // }
-  // elasticClient.putMappingsFromDirectory(elasticClient, path)
-})
-
-cli.command('add storyblok', async () => {
+cli.command('add attributes', async () => {
+  const index = await getIndexUsingCliOptions(cli.options)
   const { page, pageSize } = cli.options
-  const info = await elasticClient.info
-  addPagesFromStoryblok({
-    index: info.indices.latest.name,
-    type: 'cms_storyblok',
+  importer.importDocuments({
+    client: vsBridgeClient,
+    index: index.name,
+    type: 'attribute',
     page,
     pageSize
   })
 })
-cli.command('add attributes', () => {
-  importListOf(
-    'attribute',
-    new VsBridgeImporter('attribute', config, vsBridgeClient),
-    cli.options.page,
-    cli.options.pageSize
-  )
+cli.command('add taxrules', async () => {
+  const index = await getIndexUsingCliOptions(cli.options)
+  const { page, pageSize } = cli.options
+  importer.importDocuments({
+    client: vsBridgeClient,
+    index: index.name,
+    type: 'taxrule',
+    page,
+    pageSize
+  })
 })
-cli.command('add taxrules', () => {
-  importListOf(
-    'taxrule',
-    new VsBridgeImporter('taxrule', config, vsBridgeClient),
-    cli.options.page,
-    cli.options.pageSize
-  )
+cli.command('add categories', async () => {
+  const index = await getIndexUsingCliOptions(cli.options)
+  const { page, pageSize } = cli.options
+  importer.importDocuments({
+    client: vsBridgeClient,
+    index: index.name,
+    type: 'category',
+    page,
+    pageSize
+  })
 })
-cli.command('add categories', () => {
-  importListOf(
-    'category',
-    new VsBridgeImporter('category', config, vsBridgeClient),
-    cli.options.page,
-    cli.options.pageSize
-  )
+cli.command('add products', async () => {
+  const index = await getIndexUsingCliOptions(cli.options)
+  const { page, pageSize } = cli.options
+  importer.importDocuments({
+    client: vsBridgeClient,
+    index: index.name,
+    type: 'product',
+    page,
+    pageSize
+  })
 })
-cli.command('add products', () => {
-  importListOf(
-    'product',
-    new VsBridgeImporter('product', config, vsBridgeClient),
-    cli.options.page,
-    cli.options.pageSize
-  )
-})
-
-function importCmsPages () {
-  return importListOf(
-    'cms_page',
-    new VsBridgeImporter('cms_page', config, vsBridgeClient),
-    cli.options.page,
-    cli.options.pageSize
-  )
-}
-function importCmsBlocks () {
-  return importListOf(
-    'cms_block',
-    new VsBridgeImporter('cms_block', config, vsBridgeClient),
-    cli.options.page,
-    cli.options.pageSize
-  )
-}
-function importCmsHierarchy () {
-  return importListOf(
-    'cms_hierarchy',
-    new VsBridgeImporter('cms_hierarchy', config, vsBridgeClient),
-    cli.options.page,
-    cli.options.pageSize
-  )
-}
-cli.command('add cms', () => {
+cli.command('add cms', async () => {
+  const index = await getIndexUsingCliOptions(cli.options)
+  const { page, pageSize } = cli.options
+  function importCmsPages () {
+    return importer.importDocuments({
+      client: vsBridgeClient,
+      index: index.name,
+      type: 'cms_page',
+      page,
+      pageSize
+    })
+  }
+  function importCmsBlocks () {
+    return importer.importDocuments({
+      client: vsBridgeClient,
+      index: index.name,
+      type: 'cms_block',
+      page,
+      pageSize
+    })
+  }
+  function importCmsHierarchy () {
+    return importer.importDocuments({
+      client: vsBridgeClient,
+      index: index.name,
+      type: 'cms_hierarchy',
+      page,
+      pageSize
+    })
+  }
   const { pages, blocks, hierarchy } = cli.options
   if (pages) {
     importCmsPages()
@@ -373,35 +277,43 @@ cli.command('add cms', () => {
     importCmsHierarchy()
   }
 })
+cli.command('add storyblok', async () => {
+  const index = await getIndexUsingCliOptions(cli.options)
+  const { page, pageSize } = cli.options
+  importer.importDocuments({
+    client: storyblokClient,
+    index: index.name,
+    type: 'cms_storyblok',
+    page,
+    pageSize
+  })
+})
 
 const commandLineUsage = require('command-line-usage')
 function showHelp () {
   console.log(commandLineUsage([
     {
       header: 'Elasticsearch javascript cli specialized for vue-storefront.',
-      content: ''
+      // i needed to double escape '}' even tho using a template string, cause chalk could not handle it (parsing error).
+      content: `To select an index for a command use \\{ --id <number> | --name <string> | --latest | --aliased | --selected \\}. Otherwise the currently selected index will be used (if any). For mapping selection use \\{ --path \\} if you want to use mappings from a directory different than the project.`
     },
     {
       header: 'Synopsis',
       content: [
         { name: 'help | h | ', summary: 'show help' },
-        { name: 'info', summary: 'show some info' },
-        { name: 'create index', summary: 'creates a new index, adds current mappings' },
-        { name: 'alias index --id <number> | --name <string>', summary: 'sets THE alias to an index' },
-        { name: 'reindex', summary: 'creates a new index, adds current mappings and uses the previous index to copy the documents from' },
-        { name: 'delete index --id <number> | --name <string>', summary: 'deletes an index by id or name' },
-        { name: 'delete latest index', summary: 'delete latest index' },
-        { name: 'update mappings for latest index', summary: 'updates all mappings for the latest index' },
-        { name: 'update mappings for aliased index', summary: 'updates all mappings for the aliased index' },
-        // { name: 'update mappings for selected index', summary: 'updates all mappings for the selected index' },
-        // { name: 'update mappings for --id <number> | --name <string> -f | --file <path>', summary: 'updates all mappings of the latest index' },
-        { name: 'publish latest index', summary: 'set alias to latest index' },
-        { name: 'add attributes', summary: 'add attributes to the latest index' },
-        { name: 'add taxrules', summary: 'add taxrules to the latest index' },
-        { name: 'add categories', summary: 'add categories to the latest index' },
-        { name: 'add products', summary: 'add products to the latest index' },
-        { name: 'add cms', summary: 'add cms to the latest index' },
-        { name: 'add storyblok', summary: 'add storyblok pages to the latest index' }
+        { name: 'info', summary: 'show elastic info' },
+        { name: 'create index', summary: 'creates a new index and adds mappings' },
+        { name: 'reindex from', summary: 'creates a new index, adds mappings and reindexes it from some given index' },
+        { name: 'delete index', summary: 'deletes some index' },
+        { name: 'update mappings ', summary: 'updates all mappings of some index' },
+        { name: 'select index', summary: 'select some index' },
+        { name: 'set alias on', summary: 'set alias on some index' },
+        { name: 'add attributes', summary: 'add attributes to some index' },
+        { name: 'add taxrules', summary: 'add taxrules to some index' },
+        { name: 'add categories', summary: 'add categories to some index' },
+        { name: 'add products', summary: 'add products to some index' },
+        { name: 'add cms', summary: 'add cms to some index' },
+        { name: 'add storyblok', summary: 'add storyblok pages someindex ' }
       ]
     }
   ]))
@@ -416,6 +328,16 @@ cli.command('', () => {
   showHelp()
 })
 
+// this command is only for test purposes
+cli.command('fail', async () => {
+  try {
+    await elasticClient.putMappingsFromDirectory('fooindex', path.resolve(__dirname, '../654'))
+  } catch (error) {
+    console.error(error)
+    process.exit(-1)
+  }
+})
+
 // handle events events
 cli.on('notfound', (action) => {
   showHelp()
@@ -425,6 +347,11 @@ cli.on('notfound', (action) => {
 
 // execute application
 ;(async () => {
-  await vsBridgeClient.auth()
+  try {
+    await vsBridgeClient.auth()
+  } catch (error) {
+    console.error(error)
+    return
+  }
   cli.parse(process.argv)
 })()

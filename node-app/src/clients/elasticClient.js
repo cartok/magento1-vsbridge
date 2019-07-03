@@ -4,6 +4,8 @@ const filesystem = require('../lib/filesystem')
 const promise = require('../lib/promise')
 const config = require('../../config/config.json')
 
+// @todo: refactor methods that use 'idOrName' object with a generalized argument type check
+// to determine whether its an index name (string) or an index id.
 class ElasticsearchClient {
   constructor (config) {
     const { host, apiVersion } = config.elasticsearch
@@ -36,22 +38,32 @@ class ElasticsearchClient {
         .map(version => parseInt(version.replace(/^.*_(\d+)$/, '$1')))
       )
 
-      // get whole data of the latest index
+      // get latest index
       const latestIndex = indices.find(i => i.name.endsWith(`_${latestId}`))
 
-      // get aliases
-      // add name to index object, just for semantic
-      const aliases = (await this.client.cat.aliases({ format: 'json' }))
-        .map(alias => Object.assign(alias, { name: alias.index }))
+      // get aliases from api
+      // only one index may be aliased, acces the first entry, and find its index obj to store the same type of information.
+      const aliases = await this.client.cat.aliases({ format: 'json' })
+      const aliasedIndex = aliases.length > 0
+        ? indices.find(i => i.name === aliases[0].index)
+        : undefined
+
+      // get selected index
+      let selectedIndex
+      try {
+        selectedIndex = require('../../var/selected-index.json')
+        selectedIndex = indices.find(i => i.name === selectedIndex.name)
+      } catch (error) {
+        selectedIndex = undefined
+      }
 
       return {
         aliases,
         indices: {
-          all: indices,
-          latest: Object.assign(latestIndex, {
-            isPublished: aliases.find(alias => alias.index === latestIndex.name) !== undefined
-          }),
-          aliased: aliases[0] // only one index may be aliased.
+          list: indices,
+          latest: latestIndex,
+          aliased: aliasedIndex,
+          selected: selectedIndex
         },
         getIndex (idOrName) {
           return indices.find(index => {
@@ -64,20 +76,88 @@ class ElasticsearchClient {
           })
         },
         hasIndex (idOrName) {
+          if (!idOrName) {
+            return this.indices.list && this.indices.list.length > 0
+          }
           return this.getIndex(idOrName) !== undefined
+        },
+        hasAlias () {
+          return this.indices.aliased !== undefined
         }
       }
     })()
   }
-  // @todo:
-  normalizeIndexIds () {
+
+  // @todo: maybe don't finish implementation, execution would take very long to execute
+  // and the implementation must make additional use of the ES task API where nothing is implemented for yet.
+  async normalizeIndexIds () {
     // get info (contains all indices named: config.elasticsearch.indexName underscore info.indices.latest.id)
-    // sort indices ascending by id
+    const info = await this.info
+    const { list: indices, aliased, selected } = info.indices
+
     // save id of selected and aliased index
-    // set normalizedId to 1
-    // assign new ids incrementing normalizedId while saving mapping for selected and aliased index
-    // use the mappings to re assign selected and aliased indices
+    const specialIds = {
+      aliased: aliased.id,
+      selected: selected.id
+    }
+
+    // create arrays of unsorted and sorted index ids
+    // @note: Array.prototype.sort is an in-place operation, but Array.prototype.map does.
+    const unsortedIndexIds = indices.map(i => i.d)
+    const sortedIndexIds = indices.map(i => i.id).sort((a, b) => {
+      if (a.id < b.id) {
+        return -1
+      }
+      if (a.id > b.id) {
+        return 1
+      }
+      return 0
+    })
+
+    // create a map that assigns the id of every index to its 'future' id.
+    const indexIdChangeMap = sortedIndexIds.reduce((map, id, newPosition) => {
+      const oldId = unsortedIndexIds.find(oldId => oldId === id)
+      if (!oldId) {
+        throw new Error('Something unexpected happend.')
+      }
+      const newId = newPosition + 1
+      map.set(oldId, newId)
+    }, new Map())
+
+    // 1. create an array of promises that resolve when for every index a new index named ${config.elastic.indexName}_${id}_temp was created by reindexing
+    // or just use Array.prototype.reduce or whatever.
+    // 2. when all promises are resolved / all temporary copys have been created: delete all old indices.
+    // 3. for every temporary index create a copy like in (1.) named ${config.elastic.indexName}_${indexIdChangeMap}.get(idOfTempIndex) to create the final sorted indices.
+    // 4. reassign selected and aliased index using the indexIdChangeMap.
   }
+  async createNextIndexAndAddMappings () {
+    return new Promise(async (resolve, reject) => {
+      console.log('\n> Will create a new index by increasing the id of the latest and adding the all mappings from the mappings directory to it.')
+      const info = await this.info
+      const indexName = info.hasIndex()
+        ? `${config.elasticsearch.indexName}_${info.indices.latest.id + 1}`
+        : `${config.elasticsearch.indexName}_1`
+      // create index
+      try {
+        await this.createIndex({ name: indexName })
+      } catch (error) {
+        reject(error)
+        return
+      }
+      // add mappings
+      try {
+        await this.putMappings(indexName)
+      } catch (error) {
+        // additional catch to delete index if mapping went wrong.
+        console.log('\n> Mapping went wrong, will delete created index.\n')
+        this.deleteIndex({ name: indexName })
+        reject(error)
+        return
+      }
+      resolve()
+    })
+  }
+
   async createIndex (idOrName) {
     const { id, name } = idOrName
     if ((id && name) || !(id || name)) {
@@ -98,37 +178,12 @@ class ElasticsearchClient {
       throw error
     }
   }
-  createNextIndexAndAddMappings () {
-    return new Promise(async (resolve, reject) => {
-      console.log('\n> Will create a new index by increasing the id of the latest and adding the all mappings from the mappings directory to it.')
-      const info = await this.info
-      const indexName = `${config.elasticsearch.indexName}_${info.indices.latest.id + 1}`
-      // create index
-      try {
-        await this.createIndex({ name: indexName })
-      } catch (error) {
-        reject(error)
-        throw error
-      }
-      // add mappings
-      try {
-        await this.putMappings(indexName)
-      } catch (error) {
-        // additional catch to delete index if mapping went wrong.
-        console.log('\n> Mapping went wrong, will delete created index.\n')
-        this.deleteIndex({ name: indexName })
-        reject(error)
-        throw error
-      }
-      resolve()
-    })
-  }
-  async reindexFromAliasedIndex () {
+
+  async reindexFrom (indexName) {
     // reindexing references:
     // https://medium.com/@eyaldahari/reindex-elasticsearch-documents-is-easier-than-ever-103f63d411c
     // https://www.elastic.co/guide/en/elasticsearch/client/javascript-api/16.x/api-reference-5-6.html#api-indices-putmapping-5-6
     // https://www.elastic.co/guide/en/elasticsearch/reference/5.6/docs-reindex.html
-
     // create a new index and add current mappings
     try {
       await this.createNextIndexAndAddMappings()
@@ -139,7 +194,7 @@ class ElasticsearchClient {
     // fill the new index with data from the previous index
     const info = await this.info
     const destIndexName = info.indices.latest.name
-    const sourceIndexName = info.indices.aliased.name
+    const sourceIndexName = indexName
     console.log(`\n> Will reindex ${destIndexName} with documents from ${sourceIndexName}\n`)
     try {
       const response = await this.client.reindex({
@@ -168,9 +223,6 @@ class ElasticsearchClient {
       throw error
     }
   }
-  // test delete index function for error handling of elastic client, guess it uses fetch.
-  // maybe i need to check the response.ok.
-  // could use fetch-errors package for it aswell.
   async deleteIndex (idOrName) {
     const { id, name } = idOrName
     if ((id && name) || !(id || name)) {
@@ -192,8 +244,68 @@ class ElasticsearchClient {
       throw error
     }
   }
+  async deleteAllIndices (idOrName) {
+    const info = await this.info
 
-  // @todo: change indexName to be isOrName, and use flow.
+    const promises = info.indices.list.map(index => () => new Promise(async (resolve, reject) => {
+      try {
+        await this.deleteIndex({ name: index.name })
+        resolve('index deleted')
+      } catch (error) {
+        // @todo: add msg
+        reject(error)
+      }
+    }))
+
+    try {
+      await promise.execPromiseReturningFunctionsSequential(promises)
+    } catch (error) {
+      console.log(`\n > Could not delete all indices.`)
+      throw error
+    }
+  }
+  async insertDocument (params = { index: '', type: '', id: -1, document: {}, idx: -1 }) {
+    const { index, type, id, document, idx } = params
+    const response = await this.client.index({
+      index,
+      type,
+      id,
+      body: document
+    })
+    if (response._shards.failed > 0) {
+      throw new Error(`From elastic client: Something went wrong when trying to add pages to '${index}'.`)
+    }
+    console.log('* Record done for', id, index, idx)
+  }
+  // @todo: use ES bulk api instead
+  async insertDocuments (params = { index: '', type: '', documents: [{}] }) {
+    const { index, type, documents } = params
+    // create an array of functions that return promises for every entry from magento.
+    // you could directly create promises, but then they would immediately start to execute while mapping.
+    // creating functions that return promises instead allows us to later decide whether we want sequential or parallel execution.
+    const promises = documents.map((entry, i) => () => new Promise(async (resolve, reject) => {
+      try {
+        await this.insertDocument({ index, type, id: entry.id, document: entry, idx: ++i })
+        resolve('document inserted')
+      } catch (error) {
+        console.log(`\n> Could not add entry with id '${entry.id}' to index '${index}'.`)
+        reject(error)
+      }
+    }))
+
+    try {
+      if (config.elasticsearch.insertDocumentsSequentially) {
+        await promise.execPromiseReturningFunctionsSequential(promises)
+      } else {
+        await promise.execPromiseReturningFunctionsParallel(promises)
+      }
+    } catch (error) {
+      console.log(`\n> Could not completely add pages to index '${index}'.`)
+      throw error
+    }
+  }
+
+  // @protected
   async putMapping (indexName, mapping) {
     console.log(`\n> Will add mapping on index '${indexName}' for type '${mapping.type}'.`)
     try {
@@ -220,18 +332,17 @@ class ElasticsearchClient {
     // use default mapping path if no mappings are given
     mappings = mappings || filesystem.readMappingsFromDirectory(path.resolve(__dirname, '../../mappings'))
     return new Promise((resolveAll, rejectAll) => {
-      promise.serial(Object.values(mappings).map(mapping => () => new Promise((resolve, reject) => {
+      promise.execPromiseReturningFunctionsSequential(Object.values(mappings).map(mapping => () => new Promise(async (resolve, reject) => {
         try {
-          const response = this.putMapping(indexName, mapping)
+          const response = await this.putMapping(indexName, mapping)
           resolve(response)
         } catch (error) {
           reject(error)
           rejectAll(error)
-          throw error
         }
       }))).then(res => {
         console.log('\n> Mappings were added successfully.\n')
-        resolveAll()
+        resolveAll('mappings added')
       })
     })
   }
@@ -244,38 +355,41 @@ class ElasticsearchClient {
     return this.putMapping(indexName, mapping)
   }
 
-  async setAlias (idOrName) {
+  async setAlias (indexName) {
     return new Promise(async (resolve, reject) => {
-      const { id, name } = idOrName
-      if ((id && name) || !(id || name)) {
-        throw new Error('Either provide id or name.')
-      }
-      const indexName = id
-        ? `${config.elasticsearch.indexName}_${id}`
-        : name
-
-      // only one alias should exist, get a list of all aliases, filter, map to index name and delete their aliases.
-      const info = await this.info
-      info.aliases
-        .filter(alias => alias.alias === config.elasticsearch.indexName)
-        .map(alias => alias.index)
-        .forEach(async (indexName) => {
-          try {
-            const response = await this.client.indices.deleteAlias({
-              index: indexName,
-              name: config.elasticsearch.indexName
-            })
-            if (!response.acknowledged) {
-              throw new Error(`Error from elastic. Could not delete alias on index '${indexName}'.`)
+      // try catch to log error from this.info or one from alias-deletition-loop
+      try {
+        const info = await this.info
+        // only one alias should exist, get a list of all aliases, filter, map to index name and delete their aliases.
+        info.aliases
+          .filter(alias => alias.alias === config.elasticsearch.indexName)
+          .map(alias => alias.index)
+          .forEach(async (indexName) => {
+            // try catch here to reject early with the correct reason
+            try {
+              const response = await this.client.indices.deleteAlias({
+                index: indexName,
+                name: config.elasticsearch.indexName
+              })
+              if (!response.acknowledged) {
+                throw new Error(`Error from elastic. Could not delete alias on index '${indexName}'.`)
+              }
+              console.log('\n> Index alias deleted, response:')
+              console.log(response)
+            } catch (error) {
+              reject(error)
+              // throw again to exit loop
+              throw error
             }
-            console.log('\n> Index alias deleted.')
-            console.log(response)
-          } catch (error) {
-            reject(error)
-            throw error
-          }
-        })
+          })
+      } catch (error) {
+        console.error(error)
+        // promise is allready rejected and can get catched outside
+        // return to stop the function execution
+        return
+      }
 
+      // create new alias
       try {
         const response = await this.client.indices.putAlias({
           index: indexName,
@@ -284,21 +398,14 @@ class ElasticsearchClient {
         if (!response.acknowledged) {
           throw new Error(`Error from elastic. Could not create alias on index '${indexName}'.`)
         }
-        console.log('\n> Index alias created')
+        console.log('\n> Index alias created, response:')
         console.log(response)
-        resolve(response)
+        resolve('alias created')
       } catch (error) {
+        console.error(error)
         reject(error)
-        throw error
       }
     })
-  }
-  // @propably-move: to cli
-  async setAliasToLatestIndex () {
-    const info = await this.info
-    const indexName = info.indices.latest.name
-    console.log(`\n> Will set alias on latest index '${indexName}'\n`)
-    return this.setAlias({ name: indexName })
   }
 }
 

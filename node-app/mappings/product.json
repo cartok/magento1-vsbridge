@@ -79,6 +79,12 @@
   "tax_class_id": {
     "type": "long"
   },
+  "lw_energy_consumption": {
+    "type": "long"
+  },
+  "lw_power_input": {
+    "type": "keyword"
+  },
   "configurable_children": {
     "properties": {
       "has_options": {
@@ -94,8 +100,5 @@
         "type": "keyword"
       }
     }
-  },
-  "lw_power_input": {
-    "type": "keyword"
   }
 }

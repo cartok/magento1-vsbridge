@@ -12,12 +12,15 @@ jsonFile.writeFileSync(
 
 process.on('unhandledRejection', (error, promise) => {
   console.error('\n> nodejs-event: Unhandled Promise Rejection!\n')
-  console.log(error, promise)
+  console.log(error)
+  console.log('\n')
+  console.log(promise)
   console.log('\n')
 })
 process.on('\n>uncaughtException', error => {
-  console.error('nodejs-event: Uncaught Exception!\n')
-  console.log({ error })
+  console.error('\n> nodejs-event: Uncaught Exception!\n')
+  console.log('\n')
+  console.log(error)
   console.log('\n')
 })
 process.on('SIGINT', () => process.exit(-1))

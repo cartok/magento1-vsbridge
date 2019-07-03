@@ -6,13 +6,18 @@ const fs = require('fs')
  * @param {*} absolutePath
  */
 function readMappingsFromDirectory (absolutePath) {
-  const typeMappings = fs.readdirSync(absolutePath, { withFileTypes: false })
-    .filter(fileName => fileName.endsWith('.json'))
-    .map(fileName => ({
-      type: fileName.replace(/(.*)\.json/, '$1'),
-      properties: require(`${absolutePath}/${fileName}`)
-    }))
-  return typeMappings
+  try {
+    const typeMappings = fs.readdirSync(absolutePath, { withFileTypes: false })
+      .filter(fileName => fileName.endsWith('.json'))
+      .map(fileName => ({
+        type: fileName.replace(/(.*)\.json/, '$1'),
+        properties: require(`${absolutePath}/${fileName}`)
+      }))
+    return typeMappings
+  } catch (error) {
+    console.log(`\n> Could not read files from '${absolutePath}'`)
+    throw error
+  }
 }
 
 module.exports = {

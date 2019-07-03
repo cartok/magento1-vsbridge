@@ -1,14 +1,29 @@
-/*
- * serial executes Promises sequentially.
- * @param {funcs} An array of funcs that return promises.
- * @example
- * const urls = ['/url1', '/url2', '/url3']
- * serial(urls.map(url => () => $.ajax(url)))
- *     .then(console.log.bind(console))
- */
-const serial = funcs =>
-  funcs.reduce((promise, func) =>
-    promise.then(result => func().then(Array.prototype.concat.bind(result))), Promise.resolve([]))
+async function execPromiseReturningFunctionsSequential (promises) {
+  for (let promise of promises) {
+    try {
+      await promise()
+    } catch (error) {
+      // @todo: add msg
+      throw error
+    }
+  }
+}
 
-// https://www.freecodecamp.org/news/node-js-module-exports-vs-exports-ec7e254d63ac/
-exports.serial = serial
+async function execPromiseReturningFunctionsParallel (promises) {
+  return new Promise(async (resolve, reject) => {
+    let triggeredPromises
+    try {
+      triggeredPromises = promises.map(p => p())
+      await Promise.all(triggeredPromises)
+      resolve(triggeredPromises)
+    } catch (error) {
+      console.log('\n> Some of the concurrent promises failed.')
+      reject(error)
+    }
+  })
+}
+
+module.exports = {
+  execPromiseReturningFunctionsSequential,
+  execPromiseReturningFunctionsParallel
+}
