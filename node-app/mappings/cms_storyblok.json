@@ -1,0 +1,52 @@
+{
+  "id": {
+    "type": "long"
+  },
+  "uuid": {
+    "type": "keyword"
+  },
+  "name": {
+    "type": "keyword"
+  },
+  "slug": {
+    "type": "keyword"
+  },
+  "full_slug": {
+    "type": "keyword"
+  },
+  "created_at": {
+    "type": "date",
+    "format": "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'||yyyy-MM-dd HH:mm:ss||yyyy-MM-dd||epoch_millis"
+  },
+  "published_at": {
+    "type": "date",
+    "format": "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'||yyyy-MM-dd HH:mm:ss||yyyy-MM-dd||epoch_millis"
+  },
+  "position": {
+    "type": "long"
+  },
+  "tag_list": {
+    "type": "nested"
+  },
+  "is_startpage": {
+    "type": "boolean"
+  },
+  "parent_id": {
+    "type": "long"
+  },
+  "group_id": {
+    "type": "keyword"
+  },
+  "alternates": {
+    "type": "nested"
+  },
+  "release_id": {
+    "type": "long"
+  },
+  "lang": {
+    "type": "keyword"
+  },
+  "content": {
+    "type": "nested"
+  }
+}

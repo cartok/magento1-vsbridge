@@ -1,14 +1,11 @@
 {
-  "type": "taxrule",
-  "properties": {
-    "id": {
-      "type": "long"
-    },
-    "rates": {
-      "properties": {
-        "rate": {
-          "type": "float"
-        }
+  "id": {
+    "type": "long"
+  },
+  "rates": {
+    "properties": {
+      "rate": {
+        "type": "float"
       }
     }
   }

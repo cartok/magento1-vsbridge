@@ -1,211 +1,208 @@
 {
-  "type": "attribute",
-  "properties": {
-    "id": {
-      "type": "long"
-    },
-    "attribute_id": {
-      "type": "long"
-    },
-    "default_value": {
-      "type": "integer"
-    },
-    "options": {
-      "properties": {
-        "value": {
-          "type": "text",
-          "index": "not_analyzed"
-        }
+  "id": {
+    "type": "long"
+  },
+  "attribute_id": {
+    "type": "long"
+  },
+  "default_value": {
+    "type": "integer"
+  },
+  "options": {
+    "properties": {
+      "value": {
+        "type": "text",
+        "index": "not_analyzed"
       }
-    },
-    "lw_style": {
-      "type": "string"
-    },
-    "lw_room": {
-      "type": "string"
-    },
-    "lw_series": {
-      "type": "string"
-    },
-    "lw_form": {
-      "type": "string"
-    },
-    "lw_wattage": {
-      "type": "string"
-    },
-    "lw_flux": {
-      "type": "string"
-    },
-    "lw_eec_cross_reference_no": {
-      "type": "string"
-    },
-    "lw_color_filter": {
-      "type": "string"
-    },
-    "lw_material_filter": {
-      "type": "string"
-    },
-    "lw_length_cm": {
-      "type": "string"
-    },
-    "lw_bv_rating": {
-      "type": "string"
-    },
-    "lw_availability_sorting": {
-      "type": "string"
-    },
-    "lw_mounting_diameter_cm": {
-      "type": "string"
-    },
-    "lw_width_cm": {
-      "type": "string"
-    },
-    "lw_price_off_percentage": {
-      "type": "string"
-    },
-    "lw_height_cm": {
-      "type": "string"
-    },
-    "is_in_stock": {
-      "type": "string"
-    },
-    "is_salable": {
-      "type": "string"
-    },
-    "is_on_sale": {
-      "type": "string"
-    },
-    "lw_is_premium": {
-      "type": "string"
-    },
-    "lw_has_fan_forward_return": {
-      "type": "string"
-    },
-    "lw_is_led_technology": {
-      "type": "string"
-    },
-    "lw_has_switch": {
-      "type": "string"
-    },
-    "lw_has_remote_control": {
-      "type": "string"
-    },
-    "lw_depth_cm": {
-      "type": "string"
-    },
-    "lw_has_motion_sensor": {
-      "type": "string"
-    },
-    "lw_diameter_cm": {
-      "type": "string"
-    },
-    "lw_mercury_level": {
-      "type": "string"
-    },
-    "layered_navigation_presentation": {
-      "type": "text"
-    },
-    "configurable_children": {
-      "properties": {
-        "attribute_id": {
-          "type": "long"
-        },
-        "default_label": {
-          "type": "text"
-        },
-        "label": {
-          "type": "text"
-        },
-        "frontend_label": {
-          "type": "text"
-        },
-        "store_label": {
-          "type": "text"
-        },
-        "lw_style": {
-          "type": "string"
-        },
-        "lw_room": {
-          "type": "string"
-        },
-        "lw_series": {
-          "type": "string"
-        },
-        "lw_form": {
-          "type": "string"
-        },
-        "lw_wattage": {
-          "type": "string"
-        },
-        "lw_flux": {
-          "type": "string"
-        },
-        "lw_eec_cross_reference_no": {
-          "type": "string"
-        },
-        "lw_color_filter": {
-          "type": "string"
-        },
-        "lw_material_filter": {
-          "type": "string"
-        },
-        "lw_length_cm": {
-          "type": "string"
-        },
-        "lw_bv_rating": {
-          "type": "string"
-        },
-        "lw_availability_sorting": {
-          "type": "string"
-        },
-        "lw_mounting_diameter_cm": {
-          "type": "string"
-        },
-        "lw_width_cm": {
-          "type": "string"
-        },
-        "lw_price_off_percentage": {
-          "type": "string"
-        },
-        "lw_height_cm": {
-          "type": "string"
-        },
-        "is_in_stock": {
-          "type": "string"
-        },
-        "is_salable": {
-          "type": "string"
-        },
-        "is_on_sale": {
-          "type": "string"
-        },
-        "lw_is_premium": {
-          "type": "string"
-        },
-        "lw_has_fan_forward_return": {
-          "type": "string"
-        },
-        "lw_is_led_technology": {
-          "type": "string"
-        },
-        "lw_has_switch": {
-          "type": "string"
-        },
-        "lw_has_remote_control": {
-          "type": "string"
-        },
-        "lw_depth_cm": {
-          "type": "string"
-        },
-        "lw_has_motion_sensor": {
-          "type": "string"
-        },
-        "lw_diameter_cm": {
-          "type": "string"
-        },
-        "lw_mercury_level": {
-          "type": "string"
-        }
+    }
+  },
+  "lw_style": {
+    "type": "string"
+  },
+  "lw_room": {
+    "type": "string"
+  },
+  "lw_series": {
+    "type": "string"
+  },
+  "lw_form": {
+    "type": "string"
+  },
+  "lw_wattage": {
+    "type": "string"
+  },
+  "lw_flux": {
+    "type": "string"
+  },
+  "lw_eec_cross_reference_no": {
+    "type": "string"
+  },
+  "lw_color_filter": {
+    "type": "string"
+  },
+  "lw_material_filter": {
+    "type": "string"
+  },
+  "lw_length_cm": {
+    "type": "string"
+  },
+  "lw_bv_rating": {
+    "type": "string"
+  },
+  "lw_availability_sorting": {
+    "type": "string"
+  },
+  "lw_mounting_diameter_cm": {
+    "type": "string"
+  },
+  "lw_width_cm": {
+    "type": "string"
+  },
+  "lw_price_off_percentage": {
+    "type": "string"
+  },
+  "lw_height_cm": {
+    "type": "string"
+  },
+  "is_in_stock": {
+    "type": "string"
+  },
+  "is_salable": {
+    "type": "string"
+  },
+  "is_on_sale": {
+    "type": "string"
+  },
+  "lw_is_premium": {
+    "type": "string"
+  },
+  "lw_has_fan_forward_return": {
+    "type": "string"
+  },
+  "lw_is_led_technology": {
+    "type": "string"
+  },
+  "lw_has_switch": {
+    "type": "string"
+  },
+  "lw_has_remote_control": {
+    "type": "string"
+  },
+  "lw_depth_cm": {
+    "type": "string"
+  },
+  "lw_has_motion_sensor": {
+    "type": "string"
+  },
+  "lw_diameter_cm": {
+    "type": "string"
+  },
+  "lw_mercury_level": {
+    "type": "string"
+  },
+  "layered_navigation_presentation": {
+    "type": "text"
+  },
+  "configurable_children": {
+    "properties": {
+      "attribute_id": {
+        "type": "long"
+      },
+      "default_label": {
+        "type": "text"
+      },
+      "label": {
+        "type": "text"
+      },
+      "frontend_label": {
+        "type": "text"
+      },
+      "store_label": {
+        "type": "text"
+      },
+      "lw_style": {
+        "type": "string"
+      },
+      "lw_room": {
+        "type": "string"
+      },
+      "lw_series": {
+        "type": "string"
+      },
+      "lw_form": {
+        "type": "string"
+      },
+      "lw_wattage": {
+        "type": "string"
+      },
+      "lw_flux": {
+        "type": "string"
+      },
+      "lw_eec_cross_reference_no": {
+        "type": "string"
+      },
+      "lw_color_filter": {
+        "type": "string"
+      },
+      "lw_material_filter": {
+        "type": "string"
+      },
+      "lw_length_cm": {
+        "type": "string"
+      },
+      "lw_bv_rating": {
+        "type": "string"
+      },
+      "lw_availability_sorting": {
+        "type": "string"
+      },
+      "lw_mounting_diameter_cm": {
+        "type": "string"
+      },
+      "lw_width_cm": {
+        "type": "string"
+      },
+      "lw_price_off_percentage": {
+        "type": "string"
+      },
+      "lw_height_cm": {
+        "type": "string"
+      },
+      "is_in_stock": {
+        "type": "string"
+      },
+      "is_salable": {
+        "type": "string"
+      },
+      "is_on_sale": {
+        "type": "string"
+      },
+      "lw_is_premium": {
+        "type": "string"
+      },
+      "lw_has_fan_forward_return": {
+        "type": "string"
+      },
+      "lw_is_led_technology": {
+        "type": "string"
+      },
+      "lw_has_switch": {
+        "type": "string"
+      },
+      "lw_has_remote_control": {
+        "type": "string"
+      },
+      "lw_depth_cm": {
+        "type": "string"
+      },
+      "lw_has_motion_sensor": {
+        "type": "string"
+      },
+      "lw_diameter_cm": {
+        "type": "string"
+      },
+      "lw_mercury_level": {
+        "type": "string"
       }
     }
   }
