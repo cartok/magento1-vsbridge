@@ -89,7 +89,7 @@ class ElasticsearchClient {
         },
         hasIndex (idOrName) {
           if (!idOrName) {
-            return this.indices.list && this.indices.list.length > 0
+            return this.indices.list && this.indices.list.length > 0 && this.indices.list.some(i => i.id !== undefined)
           }
           return this.getIndex(idOrName) !== undefined
         },
