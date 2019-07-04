@@ -37,7 +37,7 @@ class ElasticsearchClient {
       // get all indices and add 'id' and 'name' to every index.
       const indices = (await this.client.cat.indices({ format: 'json' }))
         .map(index => Object.assign(index, {
-          id: parseInt(index.index.replace(/.*?_(\d+)/, '$1')),
+          id: parseInt(index.index.replace(/.*?_(\d+)/, '$1')) || undefined,
           name: index.index
         }))
         .filter(index => index.name.startsWith(config.elasticsearch.indexName))
