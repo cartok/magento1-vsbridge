@@ -45,8 +45,5 @@
   },
   "lang": {
     "type": "keyword"
-  },
-  "content": {
-    "type": "nested"
   }
 }
