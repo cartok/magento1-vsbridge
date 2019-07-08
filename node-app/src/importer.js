@@ -27,7 +27,6 @@ async function importDocuments (params = { client: undefined, index: undefined, 
     }
 
     await elasticClient.insertDocuments({
-    // elasticClient.insertDocuments({
       index,
       type,
       documents
@@ -49,6 +48,7 @@ async function importDocuments (params = { client: undefined, index: undefined, 
   } catch (error) {
     console.log(`> Number of documents from endpoint: ${documents.length}`)
     console.log(`> Current page: ${page}\n`)
+    process.exit(-1)
   }
 }
 
